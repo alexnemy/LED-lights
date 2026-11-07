@@ -1,6 +1,6 @@
 # Album Glow
 
-Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. It is a lightweight static website built from the supplied Album Glow ZIP, with the original interface and color extraction intact. It runs in Chrome on a Chromebook; no Linux setup, backend, database, or paid service is required to use it.
+Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. It is a lightweight static website built from the supplied Album Glow ZIP, with the original dark visual style and color extraction retained. The owner-requested daily controls now use a simpler layout and a Settings window. It runs in Chrome on a Chromebook; no Linux setup, backend, database, or paid service is required to use it.
 
 **Existing website and Spotify redirect:** https://cosmic-snickerdoodle-3a661b.netlify.app/ — keep this address, including its final `/`.
 
@@ -8,34 +8,52 @@ Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. I
 
 ## Current review status
 
-- `main` preserves the original imported ZIP in commit `2e642fc`.
-- `bluetooth-reliability` contains the proposed Bluetooth changes, tests, and deployment documentation. Review before merging or releasing.
-- Physical Bluetooth stability is **not yet verified** on the owner's controller. Browser simulation cannot establish compatibility with ChromeOS's Bluetooth stack or controller firmware.
-- No live Netlify deployment is performed by preparing or pushing this repository. Linking Netlify and publishing are separate steps; follow [deployment instructions](docs/DEPLOYMENT.md).
+- The original ZIP remains unchanged in Git history at `2e642fc`. The Bluetooth reliability update was merged through PR #1.
+- `one-click-and-manual-colors` is the review branch for the simpler daily controls. Review its preview before merging or releasing; pushing this branch does not replace the production site.
+- The owner reported a successful 15-minute manual color test, followed by intermittent connection failures in other attempts. This is useful hardware evidence, not proof that the original stability problem is fully resolved. Automated tests use simulated devices and Spotify responses.
+- Follow [deployment instructions](docs/DEPLOYMENT.md) to publish to the same existing site, with its unchanged redirect URI.
 
-## Using Album Glow
+## Daily use
 
-1. Open the existing HTTPS website in Chrome on your Chromebook. Use one Album Glow tab. Close Apollo Lighting on your phone; temporarily turn off the phone's Bluetooth if you need to rule out competing connections.
-2. Select **Choose Apollo lights**, then choose your controller in Chrome's chooser.
-3. Test red, green, and blue. If necessary, choose a different discovered writable characteristic and test again. Only check **I saw the lights change** after the physical colors respond. A successful browser write alone is not verification.
-4. Enter the public Spotify **Client ID** from your own Spotify Developer app. Do not enter a Client Secret. The Client ID is configurable in the page and saved locally.
-5. In that Spotify app, keep the exact redirect URI `https://cosmic-snickerdoodle-3a661b.netlify.app/`. Select **Connect Spotify** and approve access.
-6. Play music and select **Start automatic syncing**. Color updates occur when the album changes, rather than on each track of the same album.
+**Start Album Glow** connects Bluetooth and starts Spotify sync using your saved settings. There is no mandatory color test or checkbox. Your existing Client ID, Spotify tokens, brightness, vivid mode, and interval retain their original browser-storage keys.
+
+On Chrome versions that support previously granted device access, the app loads the saved controller permission and reuses it on your click. Otherwise Chrome opens its chooser directly from that click. Revoked permission, a different browser/profile, or first use can require the chooser again. Nothing silently opens a permission prompt.
+
+For the first Spotify sign-in only, open **Settings**, enter the public **Client ID**, and save. Use the same Spotify app; never enter a Client Secret. Keep its redirect exactly `https://cosmic-snickerdoodle-3a661b.netlify.app/`. If you previously used this site, your saved Client ID is already filled in. The main **Connect Spotify** button is still available. Signing into Spotify navigates away from the page, so startup signs in before Bluetooth and then asks you to click **Start Album Glow** after returning. Subsequent startup with saved authentication uses the single button. Browser permission and Spotify approval cannot be bypassed.
+
+Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn off iPhone Bluetooth when isolating connection failures. Bluetooth retries remain bounded. A pending startup waits through those retries; **Stop syncing**, a manual color, or **Disconnect lights** cancels the pending sync intent.
+
+## Colors without Spotify
+
+1. Click **Connect Bluetooth**. Spotify sign-in and Client ID are not needed for manual lights.
+2. Select Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, White, or Warm white to apply it immediately.
+3. Or choose a custom color with the native color picker / enter a hex value and click **Apply color** (Enter in the hex field also applies it). Three- and six-digit hex values are accepted, with or without `#`.
+4. Use the main brightness slider and on/off button. Manual RGB values bypass vivid album processing and are scaled only by brightness.
+
+Choosing a manual color pauses Spotify sync and cancels stale unsent album commands, so the next poll cannot overwrite your choice. A command already transmitted cannot be recalled; the queued manual choice follows it. Invalid hex input leaves the current sync/color intact. Picker edits alone send no commands; **Apply color** sends the custom choice, reducing Bluetooth traffic.
+
+The last manual hex color is saved locally and shown after reloading. Picking a color while disconnected stores the choice for this visit and sends it when you connect; after a reconnect during this visit, manual mode restores that choice. Choosing while LEDs are software-off saves the color for power-on. There is no automatic Spotify login for manual mode. Use **Start Album Glow** or **Resume Spotify sync** to return to album colors.
+
+## Settings and optional checks
+
+The **Settings** button opens a keyboard-accessible dialog containing the Client ID, exact redirect URI and Copy button, polling speed, vivid mode, and advanced Bluetooth options. Escape or Close dismisses it. The main page retains both connection buttons, disconnect controls, brightness, power, presets, and the hex/color picker. Diagnostics are under **Connection log**.
+
+In **Advanced Bluetooth & optional color tests**, you can choose a different controller, enter a custom service, change the writable characteristic, run red/green/blue tests, and optionally remember the visually verified endpoint. That checkbox is only for verified endpoint caching, not permission to use Spotify sync. Initializer selection and browser write completion are not physical verification. Selecting another characteristic still stops sync so you can decide what to send next.
 
 The available polling intervals remain 2, 3, 5, 8, and 15 seconds. The browser avoids overlapping playback requests and honors Spotify's HTTP 429 cooldown. Background tabs and Spotify's reporting delay can slow updates. Account/app eligibility and Spotify's current developer access rules still apply.
 
 Brightness is **0–100% RGB scaling**, not the controller's separate hardware brightness register. Power uses the original Apollo-family bytes `CC2333` (on) and `CC2433` (off); these are **unverified on this particular controller**. A “bytes sent” message describes browser completion, not physical confirmation. If power does not work, do not infer that a different undocumented command is correct.
 
-## Bluetooth changes under review
+## Bluetooth connection handling
 
 - Connection, service discovery, characteristic discovery, and writes use one operation lane. Repeated clicks and old sessions cannot start concurrent GATT work in this page.
 - Each attempt logs its exact stage and success/failure. No initialization color or power commands are sent.
 - A **manual test plus visual confirmation** remembers only the device ID and service/characteristic UUIDs. Reconnects to that verified endpoint use direct lookup, with freshly acquired GATT objects. No UUID is treated as proof of the Apollo protocol.
-- A missing cached endpoint falls back to discovery and requires a fresh visual check. Network errors stop discovery and use bounded retries.
+- A missing cached endpoint falls back to discovery and clears optional visual verification; an interrupted automatic sync stops so you can choose whether to resume. Network errors stop discovery and use bounded retries.
 - Writes are serialized with at least 100 ms between completed and subsequent writes. The newest unsent color replaces obsolete queued colors; power commands stay ordered. The unsent queue is bounded.
 - Disconnects invalidate characteristics and pending commands. Old Spotify/artwork results and commands are rejected after a session or sync change. Starting power-off cancels stale queued colors.
 - Reconnects use the already selected device, without a new chooser, after 1, 2, 4, and 8 seconds. A brief successful connection does not reset the retry budget; a 30-second stable connection does.
-- Previously enabled syncing waits for Bluetooth and resumes on successful recovery to the same confirmed endpoint. Explicit **Disconnect lights** stops syncing and retries. Selecting a characteristic requires a fresh visual confirmation.
+- Previously enabled syncing waits for Bluetooth and resumes on successful recovery to the same confirmed endpoint. Explicit **Disconnect lights** stops syncing and retries. Selecting a characteristic stops sync and clears the optional verification checkbox.
 
 The first unverified discovery still inspects the original set of permitted services, plus an optional custom service. `optionalServices` grants browser permission; it does not itself query those services. Broad discovery is reduced **after visual verification**, rather than assuming a UUID from a similar controller. Write-without-response remains preferred when advertised, matching the original app. That mode does not prove the firmware applied a command.
 
@@ -43,7 +61,7 @@ See [the findings and Chromebook test guide](docs/BLUETOOTH.md) for the original
 
 ## Developing with Codex
 
-Open **alexnemy/LED-lights** in Codex and use `bluetooth-reliability` while this update is under review. Future changes can branch from the reviewed version. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
+Open **alexnemy/LED-lights** in Codex. Use `one-click-and-manual-colors` while the simpler-control update is under review. Future changes can branch from the reviewed version. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
 
 The application has no runtime packages. Development and automated tests need **Node.js 24** (Node 22+ supports the test command); no `npm install` is needed.
 

@@ -9,7 +9,7 @@
 | Existing `session.busy` guarded attempts within one session, but a replacement session could start while a previous asynchronous operation was still settling. | A shared lane across sessions, generation checks, and cleanup before the next session begins. Late chooser/connect results cannot revive an explicitly disconnected session. |
 | Every successful discovery reset `attempts=0`, even if the next connection dropped seconds later. | Four retries per unstable run, reset only after 30 seconds stable. |
 | Disconnect cleared GATT references, but controls were not reliably refreshed until a retry path ran. | Immediately clear references, pending commands, selector, and enabled state, including when a disconnect occurs during discovery. |
-| Changing the characteristic kept the previous visual confirmation and could continue syncing to a new target. | Stop sync, cancel old queued commands, and require a new manual test/confirmation. |
+| Changing the characteristic kept the previous visual confirmation and could continue syncing to a new target. | Stop sync, cancel old queued commands, and clear optional endpoint verification. Color tests live in Settings and no longer gate startup, as requested by the owner. |
 | An awaited Spotify/artwork result could outlive a disconnect or sync stop. | Check session/sync generation before sending and after writes; ignore stale results. |
 | A queued color could race power-off. | Invalidate older color intent before sending power, suppress colors while power is busy/off, restore the latest desired color on power-on. |
 
@@ -32,11 +32,11 @@ Use the reviewed update on an HTTPS address. Manual Bluetooth tests can run on a
 
 1. Start with one Album Glow tab. Close the Apollo app. For the initial comparison, switch off Bluetooth on the iPhone so it cannot hold/reclaim the controller. This is a diagnostic isolation step, not a requirement to reset everything repeatedly.
 2. Open `chrome://device-log` in another tab, choose Bluetooth entries if filters are offered, and note the time. Keep the Album Glow tab active during the actual test.
-3. Choose the Apollo controller. In Album Glow, look for: device selection complete → GATT connect completed → services → characteristics → selected writable characteristic → Ready. Do not edit custom UUIDs unless discovery evidence identifies one.
-4. Click red, green, blue with a short pause after each. Record whether the physical strip matches each one. If not, stop sync, select another writable characteristic, and repeat. A browser write completion is insufficient. Only then check the visual confirmation box.
+3. Use **Connect Bluetooth** (or **Settings → Advanced Bluetooth → Choose different lights** to force the chooser). Choose the Apollo controller if Chrome asks. In Album Glow, look for: device selection complete → GATT connect completed → services → characteristics → selected writable characteristic → Ready. Do not edit custom UUIDs unless discovery evidence identifies one.
+4. Use the main Red, Green, and Blue presets with a short pause after each. Optional diagnostic Test red/green/blue buttons are under Settings. Record whether the physical strip matches each one. If not, stop sync, select another writable characteristic, and repeat. A browser write completion is insufficient. If you want to cache a visually verified endpoint, use the optional diagnostic tests in Settings and then its optional remember checkbox. Everyday startup does not require this checkbox.
 5. Try brightness at 100%, 50%, and 0%, then restore 100%. Expect RGB dimming; the official app's hardware-brightness setting can still affect the result.
 6. Try off/on once. Record whether each changes the physical lights. If not, leave power on using the official app when needed, close it again, and report the result. The website cannot read the actual power or hardware-brightness state.
-7. On the existing production URL after release, connect Spotify and start sync. Switch between different **albums**, then tracks within one album. Try 2 and 5 second polling. Confirm color changes and approximate delay. Restore your preferred vivid mode and brightness.
+7. On the existing production URL after release, connect Spotify if needed and click **Start Album Glow**. This no longer requires a color test/checkbox. Switch between different **albums**, then tracks within one album. Try 2 and 5 second polling. Confirm color changes and approximate delay. Restore your preferred vivid mode and brightness.
 8. Leave it running for 15–30 minutes. Note each unexpected drop. Recovery should pause writes, reacquire fresh GATT objects, and resume the latest album when the same visually confirmed endpoint is available. Retries should stop after four unstable attempts rather than cycle indefinitely.
 9. To test recovery intentionally, briefly remove controller power, restore it before the retry budget ends, and observe the log. This may not recover on every firmware/OS combination; report the exact result. Do not use the website's Disconnect button for this particular test: that button intentionally cancels recovery.
 10. Click **Disconnect lights**. Verify it stays disconnected and sync stops. Reconnect by choosing the controller, manually test/confirm again, and restart sync.
@@ -55,3 +55,14 @@ Copy the **visible Album Glow Connection log** immediately after the failure (it
 Do **not** send access tokens, browser local/session storage dumps, Spotify OAuth URLs containing `code`, screenshots of private account settings, or a network/HAR export. The visible app log is sufficient for this first comparison. Redact unrelated device addresses/account information in ChromeOS logs.
 
 Interpretation: if `GATT connect` fails before discovery, narrowing discovery cannot repair that failed attempt. If direct service/characteristic lookup succeeds but writes trigger a drop, the next investigation is write method/timing and controller behavior. A successful Apollo phone app is useful comparison evidence, not proof the Chromebook's Web Bluetooth connection must work identically.
+
+
+## Simpler-control acceptance checks
+
+The `one-click-and-manual-colors` update retains the same GATT lane and queue. The owner explicitly requested moving setup/testing into Settings and removing mandatory manual color verification from startup. Optional verified-endpoint caching still distinguishes browser completion from physical verification.
+
+On its HTTPS preview, connect Bluetooth without Spotify, apply several presets and a custom hex value, change brightness, and check off/on only if supported by your controller. Confirm picker edits alone do not send colors until Apply. Open/close Settings and verify the advanced tests remain available. Close the preview tab before connecting from production so it cannot hold the controller.
+
+After the reviewed release on the existing URL, use the saved Client ID/session with **Start Album Glow** and no checkbox. Confirm Spotify updates album colors. Select a manual preset while Spotify is active; subsequent polling must stop and leave that manual choice. Resume Spotify and confirm the current album is resent. Test an unexpected disconnect in both modes: pending Spotify startup should resume after recovery, while manual mode should restore its chosen color without Spotify requests.
+
+A fresh preview origin has separate browser storage and an unregistered Spotify redirect. Use it for Bluetooth/manual controls. Automated startup tests use fake Spotify tokens/responses; do not copy real production tokens into a preview or change the Spotify registration for it.

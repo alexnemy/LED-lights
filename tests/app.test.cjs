@@ -7,11 +7,12 @@ const html = fs.readFileSync(require.resolve('../index.html'),'utf8');
 const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const helper = fs.readFileSync(require.resolve('../bluetooth.js'),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function harness(t, {search='', session={}, saved={}, requestDevice}={}) {
-  const elements=new Map(), writes=[], requests=[], redirects=[];
+function harness(t, {search='', session={}, saved={}, requestDevice, getDevices, fetch:fetchOverride}={}) {
+  const elements=new Map(), writes=[], requests=[], redirects=[], chooserCalls=[];
   const storage = (seed={}) => {const data=new Map(Object.entries(seed));return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};};
   const element = id => {
     if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,textContent:'',style:{},classList:{toggle(){}},
+      attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];},focus(){this.focused=true;},showModal(){this.open=true;},close(){this.open=false;},
       children:[],replaceChildren(){this.children=[];this.value='';},append(opt){this.children.push(opt);},select(){}});
     return elements.get(id);
   };
@@ -23,18 +24,18 @@ function harness(t, {search='', session={}, saved={}, requestDevice}={}) {
       async getPrimaryService(){return {uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristic(){return c;}};}}};
   const sandbox={console,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
     btoa:s=>Buffer.from(s,'binary').toString('base64'),setTimeout,clearTimeout,
-    document:{getElementById:element,createElement:()=>({}),addEventListener(){},hidden:false},
+    document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener(){},hidden:false},
     localStorage:storage(saved),sessionStorage:storage(session),
-    navigator:{bluetooth:{requestDevice:requestDevice|| (async()=>device)}},
+    navigator:{bluetooth:{requestDevice:(...args)=>{chooserCalls.push(args);return requestDevice?requestDevice(...args):Promise.resolve(device);},...(getDevices?{getDevices:()=>getDevices(device)}:{})}},
     location:{origin:'https://cosmic-snickerdoodle-3a661b.netlify.app',pathname:'/',protocol:'https:',search,assign:url=>redirects.push(url)},
     history:{replaceState(){}},
-    fetch:async(url,options)=>{requests.push({url,options});return {ok:true,status:204,headers:{get:()=>null}};}};
+    fetch:fetchOverride|| (async(url,options)=>{requests.push({url,options});return {ok:true,status:204,headers:{get:()=>null}};})};
   const context=vm.createContext(sandbox);
   vm.runInContext(helper,context);vm.runInContext(source,context);
   const run=code=>vm.runInContext(code,context);
   run('bluetooth.writeGap=0');
   t.after(()=>run('btDisconnect()'));
-  return {context,run,element,writes,requests,redirects,device,c,async connect(){await run('pickBluetooth()');}};
+  return {context,run,element,writes,requests,redirects,device,c,chooserCalls,async connect(){await run('pickBluetooth()');}};
 }
 
 test('production scripts parse and page loads with the same HTTPS redirect and configurable Client ID', t=>{
@@ -75,7 +76,7 @@ test('a power-off intent cancels queued old colors rather than relighting the st
   assert.deepEqual(h.writes,[[0x78,255,0,0,0,0xf0,0xee],[0xcc,0x24,0x33]]);
 });
 
-test('selecting any characteristic requires a fresh visual check and stops sync', async t=>{
+test('selecting any characteristic clears optional verification and stops sync', async t=>{
   const h=harness(t);await h.connect();await h.run('testColor(255,0,0)');
   h.element('confirmed').checked=true;h.element('confirmed').onchange();
   assert.ok(h.context.localStorage.getItem('albumglow_ble_endpoint_v1'));
@@ -160,4 +161,194 @@ test('Disconnect while the chooser is open prevents its late result reconnecting
   let finish;const h=harness(t,{requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
   const pick=h.run('pickBluetooth()');h.run('btDisconnect()');finish(h.device);await pick;
   assert.equal(h.device.gatt.connected,false);assert.equal(h.run('bluetooth.session'),null);
+});
+
+const savedSpotify=()=>({albumglow_client:'a'.repeat(32),albumglow_tokens:JSON.stringify({access:'mock',expires:Date.now()+100000})});
+
+test('one-click startup reconnects previously permitted lights and starts sync without color confirmation', async t=>{
+  const h=harness(t,{saved:{...savedSpotify(),albumglow_device:'mock'},getDevices:device=>Promise.resolve([device])});
+  await settle();await h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,0);assert.equal(h.device.gatt.connected,true);
+  assert.equal(h.run('syncing'),true);assert.equal(h.element('confirmed').checked,false);
+  assert.equal(h.element('settingsDialog').open,undefined);
+  assert.equal(h.element('startupBtn').disabled,false);
+  await new Promise(resolve=>setTimeout(resolve,10));assert.equal(h.requests.length,1);
+});
+
+test('startup uses the chooser immediately when saved-device support is absent', async t=>{
+  const h=harness(t,{saved:savedSpotify()});
+  const startup=h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,1); // Called before the async function yields.
+  await startup;assert.equal(h.run('syncing'),true);
+});
+
+test('revoked saved-device access falls back to a chooser from the next user click', async t=>{
+  const h=harness(t,{saved:{...savedSpotify(),albumglow_device:'mock'},getDevices:()=>Promise.reject(new Error('not allowed'))});
+  await settle();await h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,1);assert.equal(h.run('syncing'),true);
+});
+
+test('missing Spotify setup opens Settings without a Bluetooth chooser or OAuth redirect', async t=>{
+  const h=harness(t);await h.run('startAlbumGlow()');
+  assert.equal(h.element('settingsDialog').open,true);assert.equal(h.element('clientId').focused,true);
+  assert.equal(h.chooserCalls.length,0);assert.equal(h.redirects.length,0);
+  assert.equal(h.device.gatt.connected,false);
+});
+
+test('Client ID and custom service save once; invalid ID does not replace an existing saved ID', t=>{
+  const h=harness(t,{saved:{albumglow_client:'b'.repeat(32)}});
+  assert.equal(h.element('clientId').value,'b'.repeat(32));
+  h.element('clientId').value='c'.repeat(32);h.element('customService').value='ffd5';h.run('saveSettings()');
+  assert.equal(h.context.localStorage.getItem('albumglow_client'),'c'.repeat(32));
+  assert.equal(h.context.localStorage.getItem('albumglow_custom_service'),'ffd5');
+  h.element('clientId').value='invalid';h.run('saveSettings()');
+  assert.equal(h.context.localStorage.getItem('albumglow_client'),'c'.repeat(32));
+  assert.match(h.element('settingsStatus').textContent,/32-character/);
+});
+
+test('first-time startup signs into Spotify before attempting Bluetooth and keeps exact redirect', async t=>{
+  const h=harness(t,{saved:{albumglow_client:'a'.repeat(32)}});await h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,0);assert.equal(h.redirects.length,1);
+  assert.equal(new URL(h.redirects[0]).searchParams.get('redirect_uri'),'https://cosmic-snickerdoodle-3a661b.netlify.app/');
+  assert.equal(h.context.sessionStorage.getItem('ag_start_after_login'),'1');
+});
+
+test('OAuth startup callback stores tokens and offers a user-gesture continuation without a chooser', async t=>{
+  const h=harness(t,{saved:{albumglow_client:'a'.repeat(32)},search:'?code=callback-code&state=state123',
+    session:{ag_verifier:'test-verifier',ag_state:'state123',ag_start_after_login:'1'},
+    fetch:async()=>({ok:true,json:async()=>({access_token:'test-access',refresh_token:'test-refresh',expires_in:3600})})});
+  await settle();assert.equal(h.run('spotifyToken.access'),'test-access');
+  assert.match(h.element('startupStatus').textContent,/Click Start Album Glow/);
+  assert.equal(h.context.sessionStorage.getItem('ag_start_after_login'),null);
+  assert.equal(h.chooserCalls.length,0);
+});
+
+test('duplicate startup clicks issue only one chooser', async t=>{
+  let finish;const h=harness(t,{saved:savedSpotify(),requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
+  const first=h.run('startAlbumGlow()');await h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,1);finish(h.device);await first;
+  assert.equal(h.run('syncing'),true);
+});
+
+test('cancelled chooser releases startup button and does not connect or sync', async t=>{
+  const h=harness(t,{saved:savedSpotify(),requestDevice:async()=>{throw new DOMException('cancelled','NotFoundError');}});
+  await h.run('startAlbumGlow()');
+  assert.equal(h.element('startupBtn').disabled,false);assert.equal(h.run('startupRequest'),null);
+  assert.equal(h.run('syncing'),false);assert.equal(h.device.gatt.connected,false);
+});
+
+test('startup resumes after an automatic connection retry, without a second click', async t=>{
+  const h=harness(t,{saved:savedSpotify()});const connect=h.device.gatt.connect;let attempts=0;
+  h.device.gatt.connect=async function(){if(++attempts===1)throw new DOMException('lost','NetworkError');return connect.call(this);};
+  await h.run('startAlbumGlow()');assert.equal(h.run('syncing'),false);
+  assert.equal(h.element('startupBtn').disabled,true);
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  assert.equal(h.run('syncing'),true);assert.equal(h.element('startupBtn').disabled,false);
+  assert.equal(h.chooserCalls.length,1);
+});
+
+test('Stop during pending startup prevents late chooser result from starting sync', async t=>{
+  let finish;const h=harness(t,{saved:savedSpotify(),requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
+  const startup=h.run('startAlbumGlow()');h.element('stopBtn').onclick();finish(h.device);await startup;
+  assert.equal(h.run('syncing'),false);assert.equal(h.run('startupRequest'),null);
+});
+
+test('manual hex colors send exact RGB without Spotify, even when vivid mode is enabled', async t=>{
+  const h=harness(t);await h.connect();h.element('vividColors').checked=true;
+  await h.run('applyManualColor("#E82838")');
+  assert.deepEqual(h.writes.at(-1),[0x78,232,40,56,0,0xf0,0xee]);
+  assert.equal(h.run('syncing'),false);assert.equal(h.requests.length,0);
+  assert.equal(h.context.localStorage.getItem('albumglow_manual_color'),'#E82838');
+});
+
+test('manual color cancels a pending startup and is applied when Bluetooth becomes ready', async t=>{
+  let finish;const h=harness(t,{saved:savedSpotify(),requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
+  const startup=h.run('startAlbumGlow()');await h.run('applyManualColor("#0000FF")');finish(h.device);await startup;await settle();
+  assert.equal(h.run('syncing'),false);assert.equal(h.requests.length,0);
+  assert.deepEqual(h.writes.at(-1),[0x78,0,0,255,0,0xf0,0xee]);
+});
+
+test('manual shorthand hex honors saved brightness and pauses Spotify', async t=>{
+  const h=harness(t,{saved:{...savedSpotify(),albumglow_brightness:'50'}});await h.connect();
+  h.run('startSync()');await h.run('applyManualColor("0f8")');
+  assert.equal(h.run('syncing'),false);assert.equal(h.run('syncTimer'),null);
+  assert.deepEqual(h.writes.at(-1),[0x78,0,128,68,0,0xf0,0xee]);
+  assert.equal(h.element('manualHex').value,'#00FF88');
+});
+
+test('invalid hex does not send a command or stop an active Spotify sync', async t=>{
+  const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('startSync()');
+  await h.run('applyManualColor("#GG0000")');
+  assert.equal(h.run('syncing'),true);assert.equal(h.writes.length,0);
+  assert.equal(h.element('manualHex').getAttribute('aria-invalid'),'true');
+});
+
+test('picker edits do not flood Bluetooth; Apply sends the selected color', async t=>{
+  const h=harness(t);await h.connect();
+  h.element('manualPicker').oninput({target:{value:'#124578'}});
+  assert.equal(h.writes.length,0);assert.equal(h.element('manualHex').value,'#124578');
+  await h.element('manualApplyBtn').onclick();
+  assert.deepEqual(h.writes.at(-1),[0x78,18,69,120,0,0xf0,0xee]);
+});
+
+test('manual color selected while off is restored on power-on without a Spotify request', async t=>{
+  const h=harness(t);await h.connect();await h.run('setLedPower(false)');const count=h.writes.length;
+  await h.run('applyManualColor("#112233")');assert.equal(h.writes.length,count);
+  assert.match(h.element('manualStatus').textContent,/saved for when/);
+  await h.run('setLedPower(true)');
+  assert.deepEqual(h.writes.at(-1),[0x78,17,34,51,0,0xf0,0xee]);assert.equal(h.requests.length,0);
+});
+
+test('manual color can be picked before connecting Bluetooth and applies on connection', async t=>{
+  const h=harness(t);await h.run('applyManualColor("#FFCC88")');
+  assert.equal(h.writes.length,0);assert.match(h.element('manualStatus').textContent,/connect Bluetooth/);
+  await h.connect();await settle();
+  assert.deepEqual(h.writes.at(-1),[0x78,255,204,136,0,0xf0,0xee]);
+});
+
+test('manual mode ignores stale Spotify playback response and prevents LED override', async t=>{
+  const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('syncing=true');
+  let finish;h.context.fetch=()=>new Promise(resolve=>{finish=resolve;});
+  const poll=h.run('checkSpotify()');await settle();await h.run('applyManualColor("#0000FF")');
+  finish({status:204,ok:true,headers:{get:()=>null}});await poll;
+  assert.equal(h.element('syncStatus').textContent,'Not syncing');
+  assert.deepEqual(h.writes,[[0x78,0,0,255,0,0xf0,0xee]]);
+});
+
+test('manual mode cancels an already queued Spotify color', async t=>{
+  const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('syncing=true');
+  let release;h.c.writeValueWithoutResponse=frame=>{h.writes.push([...frame]);return new Promise(resolve=>{release=resolve;});};
+  const first=h.run('sendFrame(new Uint8Array([1]))');await settle();
+  const old=h.run('sendLedRgb(255,0,0,{valid:()=>syncing})');const cancelled=assert.rejects(old,{name:'AbortError'});
+  const manual=h.run('applyManualColor("#00FF00")');release();await first;await cancelled;await settle();release();await manual;
+  assert.deepEqual(h.writes,[[1],[0x78,0,255,0,0,0xf0,0xee]]);
+});
+
+test('resume Spotify after a manual color starts a fresh album update without mandatory testing', async t=>{
+  const h=harness(t,{saved:savedSpotify()});await h.connect();await h.run('applyManualColor("#FF0000")');
+  h.run('currentAlbum="old";startSync()');
+  assert.equal(h.run('syncing'),true);assert.equal(h.run('currentAlbum'),'');
+  assert.equal(h.run('manualRequested'),false);assert.equal(h.element('confirmed').checked,false);
+});
+
+test('retry exhaustion releases one-click startup rather than leaving its button stuck', async t=>{
+  const h=harness(t,{saved:savedSpotify()});
+  h.device.gatt.connect=async()=>{throw new DOMException('not available','NetworkError');};
+  await h.run('startAlbumGlow()');
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.session.attempts=4;bluetooth.connect(bluetooth.session)');
+  assert.equal(h.element('startupBtn').disabled,false);assert.equal(h.run('startupRequest'),null);
+  assert.equal(h.run('syncing'),false);assert.match(h.element('startupStatus').textContent,/Automatic retries stopped/);
+});
+
+test('Choose different lights bypasses the stored grant and requests fresh permission', async t=>{
+  const h=harness(t,{saved:{albumglow_device:'mock'},getDevices:device=>Promise.resolve([device])});
+  await settle();await h.connect();assert.equal(h.chooserCalls.length,0);
+  await h.run('pickBluetooth({forceChooser:true})');assert.equal(h.chooserCalls.length,1);
+});
+
+test('stale JSON decoding cannot mark manual mode as Spotify syncing', async t=>{
+  const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('syncing=true');
+  let finish;h.context.fetch=async()=>({status:200,ok:true,headers:{get:()=>null},json:()=>new Promise(resolve=>{finish=resolve;})});
+  const poll=h.run('checkSpotify()');await settle();await h.run('applyManualColor("#00FF00")');finish({});await poll;
+  assert.equal(h.element('syncStatus').textContent,'Not syncing');assert.equal(h.run('syncing'),false);
 });

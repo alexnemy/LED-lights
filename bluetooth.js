@@ -185,7 +185,7 @@ class AlbumGlowBluetooth {
         s.ready = true;
         this.log('BT: selected writable characteristic ' + s.characteristic.uuid + ' (selection is not proof the lights respond)');
         this.onReady({device: s.device, entries, index});
-        this.onState('Ready: ' + s.device.name + ' · test colors to verify the controller');
+        this.onState('Ready: ' + s.device.name);
         s.stage = null;
         // Brief successful connections do not reset the failure budget.
         s.stableTimer = this.timers.setTimeout(() => {
