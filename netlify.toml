@@ -1,0 +1,8 @@
+[build]
+  command = "npm test && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# No site name or redirect overrides: link to the EXISTING Netlify project.
