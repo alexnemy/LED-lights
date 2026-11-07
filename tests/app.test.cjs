@@ -361,3 +361,23 @@ test('repeated first-time startup clicks cannot race OAuth state and PKCE verifi
   assert.equal(params.get('state'),h.context.sessionStorage.getItem('ag_state'));
   assert.equal(h.element('startupBtn').disabled,true);assert.equal(h.element('spotifyBtn').disabled,true);
 });
+
+test('a blocked frame permissions policy prevents Bluetooth selection and gives direct-tab guidance', async t=>{
+  const h=harness(t,{saved:savedSpotify()});
+  h.context.document.permissionsPolicy={allowsFeature:feature=>feature!=='bluetooth'};
+  await h.run('startAlbumGlow()');
+  assert.equal(h.chooserCalls.length,0);assert.equal(h.device.gatt.connected,false);
+  assert.match(h.element('alert').textContent,/own Chrome tab/);
+  assert.equal(h.element('startupBtn').disabled,false);
+});
+
+test('Chrome featurePolicy fallback detects a blocked Bluetooth context', async t=>{
+  const h=harness(t);h.context.document.featurePolicy={allowsFeature:()=>false};
+  await h.connect();assert.equal(h.chooserCalls.length,0);
+  assert.match(h.element('alert').textContent,/Embedded previews/);
+});
+
+test('an unrecognized policy feature does not produce a false Bluetooth-blocked message', async t=>{
+  const h=harness(t);h.context.document.featurePolicy={features:()=>['camera'],allowsFeature:()=>false};
+  await h.connect();assert.equal(h.chooserCalls.length,1);assert.equal(h.device.gatt.connected,true);
+});

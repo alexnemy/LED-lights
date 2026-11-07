@@ -386,6 +386,15 @@ const bluetooth=new AlbumGlowBluetooth({
   }
  }
 });
+function requireBluetoothAccess(){
+ if(!navigator.bluetooth)throw Error('Web Bluetooth is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
+ const policy=document.permissionsPolicy||document.featurePolicy;
+ // Older engines also return false for policy names they do not recognize.
+ const recognized=!policy?.features || policy.features().includes('bluetooth');
+ if(recognized && policy?.allowsFeature?.('bluetooth')===false){
+  throw Error('Chrome is blocking Bluetooth for this page. Open the Album Glow preview or website directly in its own Chrome tab, then try Connect Bluetooth again. Embedded previews may not allow Bluetooth.');
+ }
+}
 async function pickBluetooth({startup=null,forceChooser=false}={}){
  if($('btBtn').disabled)return false;
  if(!startup)cancelStartup();
@@ -394,7 +403,7 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
  $('btBtn').disabled=true;renderStartup();
  try{
   $('alert').textContent='';
-  if(!navigator.bluetooth)throw Error('Web Bluetooth is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
+  requireBluetoothAccess();
   let services=[...COMMON_SERVICES];
   const cached=bluetooth.cachedEndpoint();if(cached)services.push(cached.service);
   const custom=$('customService').value.trim();
