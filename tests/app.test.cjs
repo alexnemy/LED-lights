@@ -352,3 +352,12 @@ test('stale JSON decoding cannot mark manual mode as Spotify syncing', async t=>
   const poll=h.run('checkSpotify()');await settle();await h.run('applyManualColor("#00FF00")');finish({});await poll;
   assert.equal(h.element('syncStatus').textContent,'Not syncing');assert.equal(h.run('syncing'),false);
 });
+
+test('repeated first-time startup clicks cannot race OAuth state and PKCE verifier storage', async t=>{
+  const h=harness(t,{saved:{albumglow_client:'a'.repeat(32)}});
+  const first=h.run('startAlbumGlow()');await h.run('startAlbumGlow()');await h.run('spotifyConnect()');await first;
+  assert.equal(h.redirects.length,1);assert.equal(h.chooserCalls.length,0);
+  const params=new URL(h.redirects[0]).searchParams;
+  assert.equal(params.get('state'),h.context.sessionStorage.getItem('ag_state'));
+  assert.equal(h.element('startupBtn').disabled,true);assert.equal(h.element('spotifyBtn').disabled,true);
+});

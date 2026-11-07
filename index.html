@@ -164,7 +164,7 @@ const COMMON_SERVICES=[0xffe0,0xfff0,0xffa0,0xffb0,0xffe5,0xffd0,0xff00,0xfff6,0
 const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, writable=[], syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
-let startupRequest=null, grantedDevices=[];
+let startupRequest=null, grantedDevices=[], spotifyLoginPending=false;
 let manualColor=localStorage.getItem('albumglow_manual_color')||'#FF0000', manualRequested=false;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
@@ -236,8 +236,9 @@ function saveSettings(){
  }catch(e){$('settingsStatus').textContent=e.message;$('clientId').focus()}
 }
 function renderStartup(){
- $('startupBtn').disabled=Boolean(startupRequest)||$('btBtn').disabled;
- $('startupBtn').textContent=startupRequest?'Starting…':'Start Album Glow';
+ $('startupBtn').disabled=Boolean(startupRequest)||spotifyLoginPending||$('btBtn').disabled;
+ $('startupBtn').textContent=spotifyLoginPending?'Signing in…':startupRequest?'Starting…':'Start Album Glow';
+ $('spotifyBtn').disabled=spotifyLoginPending;
 }
 function cancelStartup(message='Startup cancelled. Your lights can be used manually.'){
  if(!startupRequest)return;
@@ -250,7 +251,7 @@ function completeStartup(){
  startupRequest=null;renderStartup();startSync();
 }
 async function startAlbumGlow(){
- if(startupRequest || $('btBtn').disabled)return;
+ if(startupRequest || spotifyLoginPending || $('btBtn').disabled)return;
  $('alert').textContent='';
  if(!spotifyToken){
   try{getClient()}catch{openSettings('Enter your Spotify Client ID once, then save. Your existing saved ID is reused automatically.');return}
@@ -305,16 +306,20 @@ function base64url(binary){return btoa(String.fromCharCode(...binary)).replace(/
 async function challenge(verifier){return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes(verifier))))}
 function getClient(){const v=$('clientId').value.trim();if(!/^[a-f0-9]{32}$/i.test(v))throw Error('Enter the 32-character Spotify Client ID from your Spotify developer dashboard.');return v}
 async function spotifyConnect(){
+ if(spotifyLoginPending)return false;
+ let navigating=false;
  try{
   if(location.protocol !== 'https:')throw Error('Spotify login requires an HTTPS-hosted address. Open your existing HTTPS Album Glow website and retry.');
   let id;try{id=getClient()}catch{openSettings('Enter and save your Spotify Client ID once, then use Connect Spotify.');return false}
   localStorage.setItem('albumglow_client',id);
+  spotifyLoginPending=true;renderStartup();
   const verifier=base64url(crypto.getRandomValues(new Uint8Array(64)));
   const state=base64url(crypto.getRandomValues(new Uint8Array(16)));
   sessionStorage.setItem('ag_verifier',verifier);sessionStorage.setItem('ag_state',state);
   const params=new URLSearchParams({client_id:id,response_type:'code',redirect_uri:REDIRECT,code_challenge_method:'S256',code_challenge:await challenge(verifier),state,scope:'user-read-currently-playing'});
-  location.assign('https://accounts.spotify.com/authorize?'+params);return true;
+  location.assign('https://accounts.spotify.com/authorize?'+params);navigating=true;return true;
  }catch(e){err(e);return false}
+ finally{if(!navigating)spotifyLoginPending=false;renderStartup()}
 }
 async function tokenPost(data){
  const response=await fetch('https://accounts.spotify.com/api/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});
