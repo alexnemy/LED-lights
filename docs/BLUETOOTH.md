@@ -61,10 +61,19 @@ Interpretation: if `GATT connect` fails before discovery, narrowing discovery ca
 
 The `one-click-and-manual-colors` update retains the same GATT lane and queue. The owner explicitly requested moving setup/testing into Settings and removing mandatory manual color verification from startup. Optional verified-endpoint caching still distinguishes browser completion from physical verification.
 
-On its HTTPS preview, connect Bluetooth without Spotify, apply several presets and a custom hex value, change brightness, and check off/on only if supported by your controller. Confirm picker edits alone do not send colors until Apply. Open/close Settings and verify the advanced tests remain available. Close the preview tab before connecting from production so it cannot hold the controller.
+On its HTTPS preview, connect Bluetooth without Spotify, apply several presets and a custom hex value, change brightness, and check off/on only if supported by your controller. Confirm picker/valid hex edits update the LEDs live, remain paced during dragging, and do not corrupt the field while typing six digits. Check that partial/invalid hex does not send black or malformed values. Open/close Settings and verify the advanced tests remain available. Close the preview tab before connecting from production so it cannot hold the controller.
 
 After the reviewed release on the existing URL, use the saved Client ID/session with **Start Album Glow** and no checkbox. Confirm Spotify updates album colors. Select a manual preset while Spotify is active; subsequent polling must stop and leave that manual choice. Resume Spotify and confirm the current album is resent. Test an unexpected disconnect in both modes: pending Spotify startup should resume after recovery, while manual mode should restore its chosen color without Spotify requests.
 
 A fresh preview origin has separate browser storage and an unregistered Spotify redirect. Use it for Bluetooth/manual controls. Automated startup tests use fake Spotify tokens/responses; do not copy real production tokens into a preview or change the Spotify registration for it.
 
 If Chrome reports that Bluetooth is disallowed by permissions policy, the chooser/connection is blocked before GATT. Open the actual HTTPS preview address in its own Chrome tab, rather than inside an embedded Netlify or other preview. The app detects this policy when Chrome exposes it and explains how to open the page directly. Application JavaScript cannot override a parent frame or server policy. If it remains blocked in a standalone tab, provide the full page address and the new visible error; this is a separate diagnosis from controller disconnections.
+
+
+## Brightness history, live colors, and log copy
+
+The preview now remembers the last browser-accepted unscaled RGB for its controller, including album colors, and migrates the previous preview’s remembered manual color. To check the reported reload bug: choose a color, reload the page, reconnect Bluetooth without selecting any color, and move brightness. It should dim that remembered color. Brightness is still RGB scaling; the saved color cannot detect later changes made by another app. With no history for this controller, the slider explicitly says it will use the visible manual selection. No independent hardware-brightness command/readback is claimed.
+
+Drag around the native color picker and type a six-digit hex value without clicking Apply (that button was removed). The final valid choice should win; continuous changes are paced at 200 ms and obsolete pending colors are cancelled. Selecting a preset or resuming Spotify must cancel earlier pending input. Repeat after a disconnect and with LEDs software-off to check that edits do not relight them unexpectedly.
+
+Use **Copy log** beside Connection log to copy all retained lines, including lines outside the scroll area, then paste them into the chat. If clipboard permission is blocked, use the selected fallback text with Ctrl+C or the browser’s Copy action. The log is bounded to the last 300 lines, so copy promptly after a failure. Do not attach a browser storage/token dump.

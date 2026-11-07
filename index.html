@@ -34,13 +34,15 @@
     .preset[aria-pressed="true"]{border-color:#a6c9ff;background:#354862}
     .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.color-controls label{margin-top:0}
     input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
-    .hex-control{flex:1;min-width:140px}.color-controls button{margin:0;height:44px}
+    .hex-control{flex:1;min-width:140px}
+    .log-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.log-heading h2,.log-heading button{margin:0}
+    #logCopyText{width:100%;min-height:130px;background:#111318;color:#ededf2;border:1px solid #525662;border-radius:9px;padding:10px;font:12px monospace}
     details summary{cursor:pointer;color:#bac2d0}details[open] summary{margin-bottom:12px}
     dialog{width:min(620px,calc(100% - 28px));max-height:85vh;overflow:auto;color:#ededf2;background:#1b1e26;border:1px solid #525662;border-radius:16px;padding:22px}
     dialog::backdrop{background:#080b12cc}.dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
     .dialog-heading h2{font-size:22px;margin:0}.dialog-heading button{margin:0}
     dialog h3{font-size:16px;margin:22px 0 8px}#alert{margin:12px 0}#settingsStatus{color:#a6c9ff}
-    @media(max-width:690px){.preset-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.heading h1{font-size:26px}.heading .chip{display:none}.heading button{padding:9px}.color-controls button{flex:1}}
+    @media(max-width:690px){.preset-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.heading h1{font-size:26px}.heading .chip{display:none}.heading button{padding:9px}}
   </style>
 </head>
 <body>
@@ -79,7 +81,7 @@
     </section>
     <section class="panel wide" aria-labelledby="manualHeading">
       <h2 id="manualHeading">Pick your color</h2>
-      <p class="tiny">No Spotify needed. Choosing a color pauses Spotify sync. Presets apply immediately; use Apply color for a custom color.</p>
+      <p class="tiny">No Spotify needed. Choosing a color pauses Spotify sync. Presets, the picker, and valid hex entries update your lights as you edit.</p>
       <div class="preset-grid" id="presets" aria-label="Preset colors">
         <button class="preset" type="button" data-color="#FF0000" aria-pressed="false"><span class="preset-dot" style="--preset:#FF0000" aria-hidden="true"></span>Red</button>
         <button class="preset" type="button" data-color="#FF7A00" aria-pressed="false"><span class="preset-dot" style="--preset:#FF7A00" aria-hidden="true"></span>Orange</button>
@@ -95,7 +97,6 @@
       <div class="color-controls">
         <div><label for="manualPicker">Color picker</label><input id="manualPicker" type="color" value="#ff0000"></div>
         <div class="hex-control"><label for="manualHex">Hex color</label><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-describedby="manualStatus"></div>
-        <button id="manualApplyBtn" type="button" class="primary">Apply color</button>
       </div>
       <div class="state" id="manualStatus" role="status">Connect Bluetooth to apply a color. Your last manual color is remembered.</div>
     </section>
@@ -114,10 +115,12 @@
       <button id="startBtn" class="primary" type="button">Resume Spotify sync</button>
       <button id="checkBtn" type="button">Check Spotify now</button>
     </section>
-    <details class="panel wide">
-      <summary>Connection log</summary>
-      <pre id="log" aria-live="polite">Ready. Use Start Album Glow, or connect Bluetooth to pick a color.</pre>
-    </details>
+    <section class="panel wide">
+      <div class="log-heading"><h2>Connection log</h2><button id="copyLogBtn" type="button">Copy log</button></div>
+      <details><summary>Show log</summary><pre id="log" aria-live="polite">Ready. Use Start Album Glow, or connect Bluetooth to pick a color.</pre></details>
+      <div id="logCopyStatus" class="state" role="status"></div>
+      <div id="logCopyFallback" hidden><label for="logCopyText">Log ready to copy</label><textarea id="logCopyText" readonly></textarea></div>
+    </section>
   </div>
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
     <div class="dialog-heading"><h2 id="settingsTitle">Settings</h2><button id="closeSettingsBtn" type="button" aria-label="Close settings">Close</button></div>
@@ -165,10 +168,13 @@ const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, writable=[], syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, grantedDevices=[], spotifyLoginPending=false;
-let manualColor=localStorage.getItem('albumglow_manual_color')||'#FF0000', manualRequested=false;
+const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
+let manualColor=previousManualColor||'#FF0000', manualRequested=false;
+let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManualInputAt=-Infinity;
+const MANUAL_INPUT_INTERVAL=200;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
-let ledIsOn=true, lastLedRgb=null, ledPowerBusy=false, brightnessTimer=null;
+let ledIsOn=true, lastLedRgb=null, lastLedDeviceId=null, ledPowerBusy=false, brightnessTimer=null, brightnessRequested=false;
 const POWER_FRAME=on=>new Uint8Array(on?[0xcc,0x23,0x33]:[0xcc,0x24,0x33]);
 function renderLedControls(){
  $('ledPowerBtn').disabled=ledPowerBusy||!device?.gatt?.connected||!char;
@@ -177,14 +183,31 @@ function renderLedControls(){
  $('ledBrightness').value=String(ledBrightness);
  $('ledBrightnessValue').textContent=ledBrightness+'%';
 }
+function rememberedLedColor(deviceId){
+ try{
+  const saved=JSON.parse(localStorage.getItem('albumglow_last_rgb_v1')||'null');
+  if(saved?.deviceId===deviceId && Array.isArray(saved.rgb) && saved.rgb.length===3 && saved.rgb.every(n=>Number.isInteger(n)&&n>=0&&n<=255))return saved.rgb.slice();
+ }catch{ /* Ignore malformed or unavailable local color history. */ }
+ // Migrate the last manual color saved by the previous version, only for the
+ // controller that was remembered when this page loaded.
+ if(deviceId===previousDeviceId && previousManualColor){
+  try{return rgbFromHex(normalizeHex(previousManualColor))}catch{ /* invalid old value */ }
+ }
+ return null;
+}
 async function sendLedRgb(r,g,b,{kind='color',valid=()=>true}={}){
- lastLedRgb=[r,g,b];
+ const rgb=[r,g,b],deviceId=device?.id;
+ lastLedRgb=rgb;lastLedDeviceId=deviceId||null;
  if(!ledIsOn||ledPowerBusy)return; // Keep the latest desired RGB without relighting the strip.
- const gain=ledBrightness/100;
- const power=powerGeneration;
- const scaled=lastLedRgb.map(n=>Math.max(0,Math.min(255,Math.round(n*gain))));
- await sendFrame(COLOR_FRAME(...scaled),
-  {kind,valid:()=>power===powerGeneration && ledIsOn && valid()});
+ const gain=ledBrightness/100,power=powerGeneration;
+ const scaled=rgb.map(n=>Math.max(0,Math.min(255,Math.round(n*gain))));
+ await sendFrame(COLOR_FRAME(...scaled),{kind,valid:()=>power===powerGeneration && ledIsOn && valid()});
+ // Remember unscaled RGB, including Spotify colors. This is the last browser-
+ // accepted command, not a readback of the controller or its hardware brightness.
+ if(deviceId){
+  try{localStorage.setItem('albumglow_last_rgb_v1',JSON.stringify({deviceId,rgb}))}
+  catch{log('Could not save the last LED color in this browser')}
+ }
 }
 async function setLedPower(on){
  if(ledPowerBusy)return;
@@ -203,24 +226,58 @@ async function setLedPower(on){
  }catch(e){err(e)}finally{ledPowerBusy=false;renderLedControls()}
 }
 function setLedBrightness(value){
+ brightnessRequested=true;
  const n=Number(value);ledBrightness=Number.isFinite(n)?Math.max(0,Math.min(100,Math.round(n))):100;
  localStorage.setItem('albumglow_brightness',String(ledBrightness));
  renderLedControls();
  $('ledControlsStatus').textContent='Brightness '+ledBrightness+'% (RGB dimming)';
- if(brightnessTimer!==null)clearTimeout(brightnessTimer);
- if(!ledIsOn||!lastLedRgb||!device?.gatt?.connected||!char)return;
+ if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
+ if(!device?.gatt?.connected||!char){$('ledControlsStatus').textContent='Brightness saved — connect Bluetooth to apply it.';return}
+ if(!lastLedRgb){
+  lastLedRgb=rememberedLedColor(device.id);lastLedDeviceId=device.id;
+  if(!lastLedRgb){
+   // There is no verified command for reading an unknown controller color.
+   // Use the visible manual selection and make that fallback explicit.
+   lastLedRgb=rgbFromHex(manualColor);
+   $('ledControlsStatus').textContent='Brightness will apply selected '+manualColor+'; no previous color is saved for these lights.';
+   log('Brightness is using selected '+manualColor+' because the controller color cannot be read.');
+  }
+ }
+ if(!ledIsOn||ledPowerBusy)return;
+ const run=syncGeneration;
  brightnessTimer=setTimeout(async()=>{
   brightnessTimer=null;
+  if(run!==syncGeneration||!device?.gatt?.connected||!char)return;
   try{
-   await sendLedRgb(...lastLedRgb);
+   const rgb=manualRequested?rgbFromHex(manualColor):lastLedRgb;
+   await sendLedRgb(...rgb,{valid:()=>run===syncGeneration});
    if(manualRequested)$('manualStatus').textContent=manualColor+' sent · brightness '+ledBrightness+'%';
   }catch(e){err(e)}
- },250); // Avoid flooding a temperamental Bluetooth connection while dragging.
+ },250); // Avoid flooding Bluetooth while dragging; always use unscaled RGB.
 }
 const store=key=>JSON.parse(localStorage.getItem(key)||'null');
 function log(s){const e=$('log');e.textContent=(e.textContent+'\n'+new Date().toLocaleTimeString()+': '+s).split('\n').slice(-300).join('\n');e.scrollTop=e.scrollHeight}
 function status(kind,s){$(kind+'Status').textContent=s;log(kind.toUpperCase()+': '+s)}
 function err(e){if(e?.name==='AbortError')return;let m=String(e?.message||e);$('alert').textContent=m;log('ERROR: '+m)}
+async function copyConnectionLog(){
+ if($('copyLogBtn').disabled)return;
+ const text=$('log').textContent;
+ $('copyLogBtn').disabled=true;$('logCopyFallback').hidden=true;
+ try{
+  await navigator.clipboard.writeText(text);
+  $('logCopyStatus').textContent='Log copied. Paste it into this chat.';
+ }catch{
+  // Clipboard permission can be unavailable. Keep the complete snapshot visible
+  // and selected so a normal Ctrl+C / long-press Copy still works.
+  $('logCopyFallback').hidden=false;
+  $('logCopyText').value=text;$('logCopyText').focus();$('logCopyText').select();
+  let copied=false;try{copied=Boolean(document.execCommand?.('copy'))}catch{ /* manual copy below */ }
+  if(copied){
+   $('logCopyFallback').hidden=true;$('copyLogBtn').focus();
+   $('logCopyStatus').textContent='Log copied. Paste it into this chat.';
+  }else $('logCopyStatus').textContent='Automatic copy was blocked. The log is selected below — press Ctrl+C, or long-press and choose Copy.';
+ }finally{$('copyLogBtn').disabled=false}
+}
 function openSettings(message=''){
  $('settingsStatus').textContent=message;
  if(!$('settingsDialog').open)$('settingsDialog').showModal();
@@ -273,33 +330,72 @@ function normalizeHex(value){
  if(!/^[a-f\d]{6}$/i.test(h))throw Error('Enter a hex color such as #FF8800 (3 or 6 hex digits).');
  return '#'+h.toUpperCase();
 }
-function showManualColor(value){
- $('manualHex').value=value;$('manualPicker').value=value.toLowerCase();
+function rgbFromHex(value){return [1,3,5].map(i=>parseInt(value.slice(i,i+2),16))}
+function showManualColor(value,{preserveHex=false}={}){
+ if(!preserveHex)$('manualHex').value=value;
+ $('manualPicker').value=value.toLowerCase();
  $('manualHex').setAttribute('aria-invalid','false');
  for(const button of document.querySelectorAll('[data-color]'))button.setAttribute('aria-pressed',String(button.dataset.color===value));
 }
-async function applyManualColor(value){
+function cancelLiveColorInput(){
+ if(manualInputTimer!==null)clearTimeout(manualInputTimer);
+ manualInputTimer=null;pendingManualInput=null;manualColorVersion++;
+}
+function setManualIntent(selected,options){
+ stopSync({cancelColorInput:false});manualColor=selected;manualRequested=true;
+ showManualColor(selected,options);localStorage.setItem('albumglow_manual_color',selected);
+ $('alert').textContent='';
+ $('startupStatus').textContent='Manual color mode. Use Start Album Glow to sync with Spotify again.';
+}
+function manualColorError(e){
+ if(e.name==='AbortError')return;
+ $('manualStatus').textContent=e.message;err(e);
+}
+async function sendManualColor(selected,version){
  try{
-  const selected=normalizeHex(value); // Validate before pausing an active sync.
-  stopSync();manualColor=selected;manualRequested=true;
-  showManualColor(selected);localStorage.setItem('albumglow_manual_color',selected);
-  $('startupStatus').textContent='Manual color mode. Use Start Album Glow to sync with Spotify again.';
-  const rgb=[1,3,5].map(i=>parseInt(selected.slice(i,i+2),16));
-  if(!device?.gatt?.connected || !char){
-   lastLedRgb=rgb;
+  const rgb=rgbFromHex(selected);
+  if(!device?.gatt?.connected||!char){
+   lastLedRgb=rgb;lastLedDeviceId=device?.id||null;
    $('manualStatus').textContent=selected+' saved — connect Bluetooth to apply it.';return;
   }
   const run=syncGeneration;
-  await sendLedRgb(...rgb,{valid:()=>!syncing && run===syncGeneration});
-  if(run!==syncGeneration)return;
+  await sendLedRgb(...rgb,{valid:()=>!syncing&&run===syncGeneration&&version===manualColorVersion});
+  if(run!==syncGeneration||version!==manualColorVersion)return;
   $('manualStatus').textContent=ledPowerBusy?selected+' selected — waiting for power control.':
    !ledIsOn?selected+' saved for when LEDs are turned on.':selected+' sent · brightness '+ledBrightness+'%';
- }catch(e){
-  if(e.name==='AbortError')return;
-  $('manualStatus').textContent=e.message;
-  if(!/^[#]?[a-f\d]{3}(?:[a-f\d]{3})?$/i.test(String(value).trim()))$('manualHex').setAttribute('aria-invalid','true');
-  err(e);
+ }catch(e){manualColorError(e)}
+}
+async function applyManualColor(value){
+ try{
+  const selected=normalizeHex(value); // Invalid input does not stop Spotify.
+  cancelLiveColorInput();setManualIntent(selected);
+  await sendManualColor(selected,manualColorVersion);
+ }catch(e){$('manualHex').setAttribute('aria-invalid','true');manualColorError(e)}
+}
+function queueManualColor(value,{preserveHex=false,finish=false}={}){
+ let selected;
+ try{selected=normalizeHex(value)}catch{
+  cancelLiveColorInput();$('manualHex').setAttribute('aria-invalid','true');
+  $('manualStatus').textContent='Enter 3 or 6 hex digits; the lights keep their last color while you type.';
+  return;
  }
+ // change/blur follows input: format the completed field without sending twice.
+ if(finish&&manualRequested&&selected===manualColor){showManualColor(selected);return}
+ setManualIntent(selected,{preserveHex});
+ const version=++manualColorVersion;pendingManualInput={selected,version};
+ $('manualStatus').textContent=selected+' selected — updating lights…';
+ if(manualInputTimer===null){
+  const wait=Math.max(0,MANUAL_INPUT_INTERVAL-(Date.now()-lastManualInputAt));
+  manualInputTimer=setTimeout(flushManualColorInput,wait);
+ }
+}
+async function flushManualColorInput(){
+ if(manualInputTimer!==null)clearTimeout(manualInputTimer);
+ manualInputTimer=null;
+ const pending=pendingManualInput;pendingManualInput=null;
+ if(!pending||pending.version!==manualColorVersion)return;
+ lastManualInputAt=Date.now();
+ await sendManualColor(pending.selected,pending.version);
 }
 function bytes(str){return new TextEncoder().encode(str)}
 function base64url(binary){return btoa(String.fromCharCode(...binary)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'')}
@@ -359,7 +455,7 @@ const bluetooth=new AlbumGlowBluetooth({
   }
  },
  onClear:()=>{
-  char=null;writable=[];currentAlbum='';syncGeneration++;
+  char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
   if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
   $('characteristic').replaceChildren();
   enableColorTests(false);
@@ -368,6 +464,7 @@ const bluetooth=new AlbumGlowBluetooth({
  onUnconfirmed:()=>{$('confirmed').checked=false;stopSync({cancelPendingStartup:false})},
  onReady:({device:connected,entries,index})=>{
   device=connected;writable=entries;char=entries[index].c;
+  if(lastLedDeviceId!==connected.id||!lastLedRgb){lastLedRgb=rememberedLedColor(connected.id);lastLedDeviceId=connected.id;}
   syncGeneration++;currentAlbum='';
   const sel=$('characteristic');sel.replaceChildren();
   entries.forEach(({c,service},i)=>{
@@ -384,6 +481,7 @@ const bluetooth=new AlbumGlowBluetooth({
     if(run===syncGeneration)$('manualStatus').textContent=ledIsOn?manualColor+' sent · brightness '+ledBrightness+'%':manualColor+' saved for when LEDs are turned on.';
    }).catch(err);
   }
+  else if(brightnessRequested)setLedBrightness(ledBrightness);
  }
 });
 function requireBluetoothAccess(){
@@ -614,7 +712,7 @@ function startSync(){
  if(!device?.gatt?.connected){err(Error('Connect Bluetooth first, or use Start Album Glow to connect and sync.'));return}
  if(!writable.length){err(Error('No writable LED characteristic was found.'));return}
  if(syncing)return;
- cancelStartup();manualRequested=false;
+ cancelStartup();cancelLiveColorInput();manualRequested=false;
  $('startupStatus').textContent='Album Glow is syncing with Spotify.';
  currentAlbum=''; // Resend current album color on every fresh start.
  syncing=true;syncGeneration++;
@@ -623,7 +721,8 @@ function startSync(){
  log('Automatic sync started; Spotify check every '+(getPollInterval()/1000)+' seconds.');
  scheduleNextPoll(0);
 }
-function stopSync({cancelPendingStartup=true}={}){
+function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
+ if(cancelColorInput)cancelLiveColorInput();
  if(cancelPendingStartup)cancelStartup();
  const wasSyncing=syncing;
  syncing=false;syncGeneration++;
@@ -686,9 +785,12 @@ $('settingsBtn').onclick=()=>openSettings();
 $('closeSettingsBtn').onclick=()=>$('settingsDialog').close();
 $('saveSettingsBtn').onclick=saveSettings;
 $('customService').value=localStorage.getItem('albumglow_custom_service')||'';
-$('manualPicker').oninput=e=>showManualColor(normalizeHex(e.target.value));
-$('manualApplyBtn').onclick=()=>applyManualColor($('manualHex').value);
-$('manualHex').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();applyManualColor(e.target.value)}};
+$('manualPicker').oninput=e=>queueManualColor(e.target.value);
+$('manualPicker').onchange=e=>queueManualColor(e.target.value,{finish:true});
+$('manualHex').oninput=e=>queueManualColor(e.target.value,{preserveHex:true});
+$('manualHex').onchange=e=>queueManualColor(e.target.value,{finish:true});
+$('manualHex').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();queueManualColor(e.target.value,{finish:true})}};
+$('copyLogBtn').onclick=copyConnectionLog;
 for(const button of document.querySelectorAll('[data-color]'))button.onclick=()=>applyManualColor(button.dataset.color);
 try{manualColor=normalizeHex(manualColor)}catch{manualColor='#FF0000'}
 showManualColor(manualColor);renderStartup();

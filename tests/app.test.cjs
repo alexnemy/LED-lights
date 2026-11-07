@@ -283,11 +283,11 @@ test('invalid hex does not send a command or stop an active Spotify sync', async
   assert.equal(h.element('manualHex').getAttribute('aria-invalid'),'true');
 });
 
-test('picker edits do not flood Bluetooth; Apply sends the selected color', async t=>{
+test('picker edits update LEDs without an Apply button and keep the hex field in sync', async t=>{
   const h=harness(t);await h.connect();
   h.element('manualPicker').oninput({target:{value:'#124578'}});
-  assert.equal(h.writes.length,0);assert.equal(h.element('manualHex').value,'#124578');
-  await h.element('manualApplyBtn').onclick();
+  assert.equal(h.element('manualHex').value,'#124578');
+  await h.run('flushManualColorInput()');
   assert.deepEqual(h.writes.at(-1),[0x78,18,69,120,0,0xf0,0xee]);
 });
 
@@ -380,4 +380,146 @@ test('Chrome featurePolicy fallback detects a blocked Bluetooth context', async 
 test('an unrecognized policy feature does not produce a false Bluetooth-blocked message', async t=>{
   const h=harness(t);h.context.document.featurePolicy={features:()=>['camera'],allowsFeature:()=>false};
   await h.connect();assert.equal(h.chooserCalls.length,1);assert.equal(h.device.gatt.connected,true);
+});
+
+function fakeTime(t){t.mock.timers.enable({apis:['setTimeout','Date'],now:0});}
+
+test('brightness uses the unscaled color remembered for this controller after a reload', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'mock',rgb:[18,170,238]}),albumglow_brightness:'50'}});
+  await h.connect();assert.equal(h.writes.length,0); // No unsolicited initialization color.
+  h.run('setLedBrightness(25)');t.mock.timers.tick(250);await settle();
+  assert.deepEqual(h.writes.at(-1),[0x78,5,43,60,0,0xf0,0xee]);
+  assert.deepEqual(JSON.parse(h.context.localStorage.getItem('albumglow_last_rgb_v1')).rgb,[18,170,238]);
+});
+
+test('brightness migrates the previous preview manual color without selecting it again', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_device:'mock',albumglow_manual_color:'#12AAEE'}});await h.connect();
+  h.run('setLedBrightness(50)');t.mock.timers.tick(250);await settle();
+  assert.deepEqual(h.writes.at(-1),[0x78,9,85,119,0,0xf0,0xee]);
+});
+
+test('all successful website RGB commands remember raw color, not brightness-scaled bytes', async t=>{
+  const h=harness(t,{saved:{albumglow_brightness:'50'}});await h.connect();await h.run('sendLedRgb(200,100,50)');
+  assert.deepEqual(h.writes.at(-1),[0x78,100,50,25,0,0xf0,0xee]);
+  assert.deepEqual(JSON.parse(h.context.localStorage.getItem('albumglow_last_rgb_v1')),{deviceId:'mock',rgb:[200,100,50]});
+});
+
+test('a cancelled RGB write cannot replace the remembered color', async t=>{
+  const h=harness(t);await h.connect();await h.run('sendLedRgb(0,0,255)');
+  await assert.rejects(h.run('sendLedRgb(255,0,0,{valid:()=>false})'),{name:'AbortError'});
+  assert.deepEqual(JSON.parse(h.context.localStorage.getItem('albumglow_last_rgb_v1')).rgb,[0,0,255]);
+});
+
+test('a different device color is not treated as the current controller state', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'other-device',rgb:[0,0,255]})}});await h.connect();
+  h.run('setLedBrightness(20)');assert.match(h.element('ledControlsStatus').textContent,/selected #FF0000/);
+  t.mock.timers.tick(250);await settle();assert.deepEqual(h.writes.at(-1),[0x78,51,0,0,0,0xf0,0xee]);
+});
+
+test('brightness chosen while disconnected applies the remembered RGB when connecting', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'mock',rgb:[0,200,100]})}});
+  h.run('setLedBrightness(50)');assert.equal(h.writes.length,0);
+  await h.connect();t.mock.timers.tick(250);await settle();
+  assert.deepEqual(h.writes.at(-1),[0x78,0,100,50,0,0xf0,0xee]);
+});
+
+test('brightness while software-off preserves color for power-on without sending an RGB command', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'mock',rgb:[100,200,50]})}});await h.connect();
+  await h.run('setLedPower(false)');const count=h.writes.length;
+  h.run('setLedBrightness(50)');t.mock.timers.tick(250);await settle();assert.equal(h.writes.length,count);
+  await h.run('setLedPower(true)');assert.deepEqual(h.writes.at(-1),[0x78,50,100,25,0,0xf0,0xee]);
+});
+
+test('malformed saved RGB cannot generate invalid color bytes', async t=>{
+  fakeTime(t);
+  const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'mock',rgb:[256,-1,'blue']})}});await h.connect();
+  assert.equal(h.run('lastLedRgb'),null);
+  h.run('setLedBrightness(50)');t.mock.timers.tick(250);await settle();
+  assert.deepEqual(h.writes.at(-1),[0x78,128,0,0,0,0xf0,0xee]);
+});
+
+test('live picker changes are paced and coalesce to the latest value during a drag', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  const at=[];const original=h.c.writeValueWithoutResponse;
+  h.c.writeValueWithoutResponse=async function(frame){at.push(Date.now());return original.call(this,frame);};
+  h.element('manualPicker').oninput({target:{value:'#FF0000'}});t.mock.timers.tick(0);await settle();
+  for(const color of ['#FF8800','#00FF00','#0000FF']){
+    t.mock.timers.tick(50);h.element('manualPicker').oninput({target:{value:color}});
+  }
+  t.mock.timers.tick(49);await settle();assert.equal(h.writes.length,1);
+  t.mock.timers.tick(1);await settle();
+  assert.deepEqual(at,[0,200]);assert.deepEqual(h.writes.at(-1),[0x78,0,0,255,0,0xf0,0xee]);
+});
+
+test('typing six-digit hex preserves the field and applies the final RGB automatically', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  for(const value of ['#','#1','#12','#123','#1234','#12345','#123456']){
+    h.element('manualHex').value=value;h.element('manualHex').oninput({target:h.element('manualHex')});
+    assert.equal(h.element('manualHex').value,value);
+  }
+  t.mock.timers.tick(0);await settle();
+  assert.deepEqual(h.writes,[[0x78,18,52,86,0,0xf0,0xee]]);
+  assert.equal(h.element('manualPicker').value,'#123456');
+});
+
+test('invalid partial hex cancels unsent input without sending black or malformed bytes', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  await h.run('applyManualColor("#0000FF")');
+  h.element('manualHex').value='#123';h.element('manualHex').oninput({target:h.element('manualHex')});
+  h.element('manualHex').value='#1234';h.element('manualHex').oninput({target:h.element('manualHex')});
+  t.mock.timers.tick(500);await settle();assert.equal(h.writes.length,1);
+  assert.equal(h.element('manualHex').getAttribute('aria-invalid'),'true');
+});
+
+test('picker change/hex blur does not resend a color already applied by input', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  h.element('manualPicker').oninput({target:{value:'#12ABEF'}});t.mock.timers.tick(0);await settle();
+  h.element('manualPicker').onchange({target:{value:'#12ABEF'}});t.mock.timers.tick(500);await settle();
+  assert.equal(h.writes.length,1);
+});
+
+test('resuming Spotify cancels a pending live manual color', async t=>{
+  fakeTime(t);const h=harness(t,{saved:savedSpotify()});await h.connect();
+  h.element('manualPicker').oninput({target:{value:'#FF0000'}});
+  h.run('startSync()');t.mock.timers.tick(500);await settle();
+  assert.equal(h.run('syncing'),true);assert.equal(h.writes.length,0);
+});
+
+test('a preset cancels a pending picker value so it cannot overwrite the preset later', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  h.element('manualPicker').oninput({target:{value:'#FF0000'}});
+  await h.run('applyManualColor("#00FF00")');t.mock.timers.tick(500);await settle();
+  assert.deepEqual(h.writes,[[0x78,0,255,0,0,0xf0,0xee]]);
+});
+
+test('Copy log copies the complete current text, including entries outside the visible scroll area', async t=>{
+  const h=harness(t);h.run('for(let i=0;i<240;i++)log("Line "+i)');
+  const expected=h.element('log').textContent;let copied;
+  h.context.navigator.clipboard={writeText:async text=>{copied=text;}};
+  await h.element('copyLogBtn').onclick();
+  assert.equal(copied,expected);assert.match(copied,/Line 0/);assert.match(copied,/Line 239/);
+  assert.match(h.element('logCopyStatus').textContent,/Log copied/);
+  assert.equal(h.element('copyLogBtn').disabled,false);
+});
+
+test('Copy log exposes a selected manual fallback when browser clipboard access fails', async t=>{
+  const h=harness(t);h.context.navigator.clipboard={writeText:async()=>{throw new Error('blocked');}};
+  h.context.document.execCommand=()=>false;
+  await h.run('copyConnectionLog()');
+  assert.equal(h.element('logCopyFallback').hidden,false);
+  assert.equal(h.element('logCopyText').value,h.element('log').textContent);
+  assert.equal(h.element('logCopyText').focused,true);
+  assert.match(h.element('logCopyStatus').textContent,/Ctrl\+C/);
+  assert.equal(h.element('copyLogBtn').disabled,false);
+});
+
+test('Copy log falls back to browser selection copy when Clipboard API is unavailable', async t=>{
+  const h=harness(t);h.context.document.execCommand=command=>command==='copy';
+  await h.run('copyConnectionLog()');
+  assert.equal(h.element('logCopyFallback').hidden,true);assert.match(h.element('logCopyStatus').textContent,/Log copied/);
 });
