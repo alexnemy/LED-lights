@@ -29,6 +29,16 @@ If the preview/locking controls are not available, the free fallback is to revie
 
 Netlify needs a one-time GitHub repository authorization and link. No Netlify integration/credential was available to the development session, so this account step was not performed automatically. Neither repo pushes nor `netlify.toml` alone prove that continuous deployment is connected.
 
+## If the pull request has no preview
+
+On the existing project's Deploys page, keep **Auto Publishing Locked**. A failed `Production: main@2e642fc` build is for the original import, which has no package.json or build scripts; it is separate from the updated pull request. The earlier working deployment should remain marked Published.
+
+Open **Deploy settings → Build & deploy → Continuous deployment → Branches and deploy contexts**. Enable **Deploy Previews** for pull requests targeting the production branch, `main`, and save. The exact control labels may vary. Enabling branch deploys is not required for a pull request preview.
+
+If the PR was created before the repository link, a subsequent commit pushed to `bluetooth-reliability` gives Netlify a fresh pull request update. If it is still a draft and Netlify skips drafts, mark it **Ready for review**; that does not merge it. Look for a **Deploy Preview / pull request #1** build in Netlify and a Netlify check on GitHub. A failed production build or the GitHub `test` checks are not a preview.
+
+If a fresh PR update still creates no preview, inspect the Deploy Preview settings and GitHub repository authorization rather than merging or repeatedly triggering production builds. Keep the existing deployment locked while investigating.
+
 ## Spotify settings
 
 Keep the existing Spotify app and Client ID. The authorized redirect is exactly:
