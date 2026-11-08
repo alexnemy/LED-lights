@@ -4,7 +4,7 @@ The required site is **https://cosmic-snickerdoodle-3a661b.netlify.app/**. Do no
 
 ## Review before release
 
-The original ZIP is preserved in history (`2e642fc`). The initial Bluetooth changes were merged through PR #1. The simpler startup/manual-color update was merged through PR #2. The connection audit is on `bluetooth-connection-audit`; review its pull request before merging. The repository can be public without containing a Spotify secret; the Client ID is entered in the page. Tokens must never go into GitHub or Netlify environment variables for this static app.
+The original ZIP is preserved in history (`2e642fc`). The initial Bluetooth changes, simpler controls, and connection audit were merged through PRs #1, #2, and #3. The optional website-permission reset is on `bluetooth-forget-recovery`; review its pull request before merging. The repository can be public without containing a Spotify secret; the Client ID is entered in the page. Tokens must never go into GitHub or Netlify environment variables for this static app.
 
 The current live deployment is not changed by the work in this repository. Connecting a Git repository to Netlify can trigger an initial build, so protect the existing deployment **before** connecting it.
 

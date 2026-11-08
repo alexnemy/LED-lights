@@ -477,6 +477,243 @@ test('an unrecognized policy feature does not produce a false Bluetooth-blocked 
 
 function fakeTime(t){t.mock.timers.enable({apis:['setTimeout','Date'],now:0});}
 
+function permissionHarness(t,{saved={}}={}){
+  let granted=true,forgets=0;
+  const h=harness(t,{saved:{albumglow_device:'mock',...saved},getDevices:d=>Promise.resolve(granted?[d]:[])});
+  h.device.forget=async()=>{forgets++;granted=false;};
+  return {...h,get forgetCalls(){return forgets;},setGranted:value=>{granted=value;}};
+}
+
+test('Forget saved lights stops syncing, revokes only Bluetooth permission, and preserves preferences', async t=>{
+  fakeTime(t);
+  const preferences={...savedSpotify(),albumglow_brightness:'60',albumglow_manual_color:'#123456',
+    albumglow_vivid:'false',albumglow_interval:'8',albumglow_custom_service:'ffd5'};
+  const h=permissionHarness(t,{saved:preferences});await settle();await h.connect();
+  await h.run('testColor(10,20,30)');h.element('confirmed').checked=true;h.element('confirmed').onchange();
+  h.run('startSync()');assert.ok(h.context.localStorage.getItem('albumglow_ble_endpoint_v1'));
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(h.forgetCalls,1);assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.run('bluetooth.session'),null);assert.equal(h.run('char'),null);
+  assert.equal(h.run('syncing'),false);assert.equal(h.run('syncTimer'),null);
+  assert.equal(h.run('grantedDevices.length'),0);assert.equal(h.element('confirmed').checked,false);
+  for(const key of ['albumglow_device','albumglow_ble_endpoint_v1','albumglow_last_rgb_v1'])assert.equal(h.context.localStorage.getItem(key),null);
+  for(const [key,value] of Object.entries(preferences))assert.equal(h.context.localStorage.getItem(key),value);
+  assert.match(h.element('forgetStatus').textContent,/permission forgotten/);
+  assert.match(h.element('log').textContent,/ChromeOS pairing was not changed/);
+  assert.doesNotMatch(h.element('log').textContent,/mock-access|mock-refresh/);
+  assert.equal(h.chooserCalls.length,0); // Forget never opens the chooser itself.
+  const next=h.run('pickBluetooth()');assert.equal(h.chooserCalls.length,1);await next;
+  assert.equal(h.device.gatt.connected,true);assert.equal(h.run('syncing'),false);
+  assert.equal(h.run('rememberedLedColor("mock")'),null); // Old legacy RGB cannot resurrect the forgotten cache.
+});
+
+test('forget on a browser without device.forget clears the app choice and reports the permission limit', async t=>{
+  const h=permissionHarness(t);await settle();delete h.device.forget;
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),null);
+  assert.equal(h.run('grantedDevices.length'),0);
+  assert.match(h.element('forgetStatus').textContent,/could not be confirmed removed/);
+  const next=h.run('pickBluetooth()');assert.equal(h.chooserCalls.length,1);await next;
+});
+
+test('forget does not claim permission was revoked when Chrome silently retains it', async t=>{
+  const h=permissionHarness(t);await settle();let calls=0;h.device.forget=async()=>{calls++;};
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(calls,1);assert.match(h.element('forgetStatus').textContent,/could not be confirmed removed/);
+  assert.doesNotMatch(h.element('forgetStatus').textContent,/permission forgotten/);
+  await h.connect();assert.equal(h.chooserCalls.length,1);
+});
+
+test('a rejected forget call gives an error, preserves Spotify, and allows a fresh chooser click', async t=>{
+  const h=permissionHarness(t,{saved:savedSpotify()});await settle();
+  h.device.forget=async()=>{throw new Error('Permission reset denied');};
+  await h.element('forgetDeviceBtn').onclick();
+  assert.match(h.element('forgetStatus').textContent,/Permission reset denied/);
+  assert.equal(h.run('forgettingDevice'),false);assert.equal(h.element('btBtn').disabled,false);
+  assert.ok(h.context.localStorage.getItem('albumglow_tokens'));assert.equal(h.run('bluetooth.session'),null);
+  await h.connect();assert.equal(h.chooserCalls.length,1);
+});
+
+test('forget without permission enumeration cannot claim verified revocation', async t=>{
+  const h=harness(t);await h.connect();let calls=0;
+  h.device.forget=async()=>{calls++;};await h.element('forgetDeviceBtn').onclick();
+  assert.equal(calls,1);assert.match(h.element('forgetStatus').textContent,/could not be confirmed removed/);
+  assert.equal(h.device.gatt.connected,false);
+});
+
+test('forget waits for a cancelled native connect and its late cleanup before revoking permission', async t=>{
+  const h=permissionHarness(t);await settle();let finish,calls=0;
+  h.device.gatt.connect=function(){calls++;return new Promise(resolve=>{finish=()=>{this.connected=true;resolve(this);};});};
+  const connect=h.run('pickBluetooth()');await settle();assert.equal(calls,1);
+  const forget=h.element('forgetDeviceBtn').onclick();await settle();
+  assert.equal(h.forgetCalls,0);assert.equal(h.element('btBtn').disabled,true);
+  assert.equal(h.element('startupBtn').disabled,true);assert.equal(h.element('changeDeviceBtn').disabled,true);
+  assert.equal(await h.run('pickBluetooth()'),false);
+  finish();await connect;await forget;
+  assert.equal(h.forgetCalls,1);assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.element('btBtn').disabled,false);assert.equal(h.run('bluetooth.session'),null);
+});
+
+test('forget drains an in-flight write, cancels unsent colors, and never sends a replacement color', async t=>{
+  const h=permissionHarness(t);await settle();await h.connect();let finish;
+  h.c.writeValueWithoutResponse=frame=>{h.writes.push([...frame]);return new Promise(resolve=>{finish=resolve;});};
+  const first=assert.rejects(h.run('sendLedRgb(255,0,0)'),{name:'AbortError'});await settle();
+  const queued=assert.rejects(h.run('sendLedRgb(0,0,255)'),{name:'AbortError'});
+  const forget=h.element('forgetDeviceBtn').onclick();await settle();assert.equal(h.forgetCalls,0);
+  finish();await first;await queued;await forget;
+  assert.equal(h.forgetCalls,1);assert.equal(h.writes.length,1);
+  assert.equal(h.context.localStorage.getItem('albumglow_last_rgb_v1'),null);
+});
+
+test('pagehide cancels a pending permission reset before it can revoke the device', async t=>{
+  const h=permissionHarness(t);await settle();let finish;
+  h.device.gatt.connect=function(){return new Promise(resolve=>{finish=()=>{this.connected=true;resolve(this);};});};
+  const connect=h.run('pickBluetooth()');await settle();
+  const forget=h.element('forgetDeviceBtn').onclick();h.dispatchWindow('pagehide',{persisted:true});
+  finish();await connect;await forget;
+  assert.equal(h.forgetCalls,0);assert.match(h.element('forgetStatus').textContent,/cancelled/);
+  assert.equal(h.device.gatt.connected,false);assert.equal(h.run('forgettingDevice'),false);
+});
+
+test('a stale permission preload cannot restore a forgotten device object', async t=>{
+  let finish;const h=harness(t,{getDevices:()=>new Promise(resolve=>{finish=resolve;})});
+  await h.connect();let forgot=0;h.device.forget=async()=>{forgot++;};
+  const oldPreload=finish;
+  h.context.navigator.bluetooth.getDevices=async()=>[];
+  await h.element('forgetDeviceBtn').onclick();oldPreload([h.device]);await settle();
+  assert.equal(forgot,1);assert.equal(h.run('grantedDevices.length'),0);
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),null);
+  await h.connect();assert.equal(h.chooserCalls.length,2);
+});
+
+test('forget cancels an open chooser and keeps Connect disabled until its stale result closes', async t=>{
+  const h=permissionHarness(t);await settle();await h.connect();let finish;
+  h.context.navigator.bluetooth.requestDevice=()=>new Promise(resolve=>{finish=resolve;});
+  const selection=h.run('pickBluetooth({forceChooser:true})');
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(h.forgetCalls,1);assert.equal(h.element('btBtn').disabled,true);
+  finish(h.device);assert.equal(await selection,false);
+  assert.equal(h.run('bluetooth.session'),null);assert.equal(h.run('grantedDevices.length'),0);
+  assert.equal(h.device.gatt.connected,false);assert.equal(h.element('btBtn').disabled,false);
+});
+
+test('an absent saved device does not cause another permitted device to be forgotten', async t=>{
+  let forgot=0;
+  const other={id:'unrelated',forget:async()=>{forgot++;}};
+  const h=harness(t,{saved:{albumglow_device:'missing'},getDevices:()=>Promise.resolve([other])});await settle();
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(forgot,0);assert.equal(h.context.localStorage.getItem('albumglow_device'),null);
+  assert.equal(h.run('grantedDevices.length'),1);
+});
+
+test('forget with multiple grants and no saved choice asks for a selection instead of guessing', async t=>{
+  let forgot=0;const devices=['one','two'].map(id=>({id,forget:async()=>{forgot++;}}));
+  const h=harness(t,{getDevices:()=>Promise.resolve(devices)});await settle();
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(forgot,0);assert.match(h.element('forgetStatus').textContent,/More than one device/);
+  assert.equal(h.chooserCalls.length,0);
+});
+
+test('forget clears only the targeted controller metadata', async t=>{
+  const saved={albumglow_ble_endpoint_v1:JSON.stringify({deviceId:'another',service:'other',characteristic:'other'}),
+    albumglow_last_rgb_v1:JSON.stringify({deviceId:'another',rgb:[1,2,3]})};
+  const h=permissionHarness(t,{saved});await settle();await h.element('forgetDeviceBtn').onclick();
+  assert.equal(h.forgetCalls,1);
+  for(const [key,value] of Object.entries(saved))assert.equal(h.context.localStorage.getItem(key),value);
+});
+
+test('forget refuses to revoke a device while another same-origin tab owns it', async t=>{
+  const h=permissionHarness(t);await settle();let claims=0;
+  h.run('bluetooth.ownership={}');h.run('bluetooth.ownership').acquire=async()=>{claims++;return null;};
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(claims,1);assert.equal(h.forgetCalls,0);
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),'mock');
+  assert.match(h.element('forgetStatus').textContent,/Another Album Glow tab/);
+  assert.equal(h.device.gatt.connected,false);
+});
+
+test('cancelling a pending reset ownership claim releases a late lease without forgetting', async t=>{
+  const h=permissionHarness(t);await settle();let finish,releases=0;
+  h.run('bluetooth.ownership={}');h.run('bluetooth.ownership').acquire=()=>new Promise(resolve=>{finish=resolve;});
+  const forget=h.element('forgetDeviceBtn').onclick();await settle();h.run('btDisconnect()');
+  finish({supported:true,async release(){releases++;}});await forget;
+  assert.equal(releases,1);assert.equal(h.forgetCalls,0);
+  assert.match(h.element('forgetStatus').textContent,/cancelled/);
+});
+
+test('a reset ownership release failure fences later native connections', async t=>{
+  const h=permissionHarness(t);await settle();let connects=0;
+  h.device.gatt.connect=async()=>{connects++;throw Error('Must not connect after failed release');};
+  h.run('bluetooth.ownership={}');h.run('bluetooth.ownership').acquire=async()=>({supported:true,async release(){throw Error('Lock release denied');}});
+  await h.element('forgetDeviceBtn').onclick();
+  assert.equal(h.forgetCalls,1);assert.match(h.element('forgetStatus').textContent,/ownership could not be released/);
+  await h.connect();assert.equal(connects,0);
+  assert.match(h.element('log').textContent,/Lock release denied/);
+});
+
+test('forget observes a failed release installed by a late cancelled connection ownership grant', async t=>{
+  const h=permissionHarness(t);await settle();let finish,claims=0;
+  h.run('bluetooth.ownership={}');
+  h.run('bluetooth.ownership').acquire=()=>{claims++;return new Promise(resolve=>{finish=resolve;});};
+  const connect=h.run('pickBluetooth()');await settle();
+  const forget=h.element('forgetDeviceBtn').onclick();
+  finish({supported:true,async release(){throw Error('Late release denied');}});
+  await connect;await forget;
+  assert.equal(claims,1);assert.equal(h.forgetCalls,0);
+  assert.match(h.element('forgetStatus').textContent,/Late release denied/);
+  assert.equal(h.device.gatt.connected,false);
+});
+
+test('automatic permission reset is disabled by default and its setting persists explicitly', async t=>{
+  const h=permissionHarness(t);await settle();assert.equal(h.element('forgetAfterFailure').checked,false);
+  h.device.gatt.connect=async()=>{throw new DOMException('unavailable','NetworkError');};
+  await h.connect();
+  for(let i=0;i<4;i++)await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  await settle();assert.equal(h.forgetCalls,0);
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),'mock');
+  h.element('forgetAfterFailure').checked=true;h.element('forgetAfterFailure').onchange();
+  assert.equal(h.context.localStorage.getItem('albumglow_forget_after_failure'),'true');
+  const restored=harness(t,{saved:{albumglow_forget_after_failure:'true'}});
+  assert.equal(restored.element('forgetAfterFailure').checked,true);
+});
+
+test('opt-in reset runs once after all five native connect failures, with no discovery, writes, or chooser', async t=>{
+  const h=permissionHarness(t,{saved:{albumglow_forget_after_failure:'true'}});await settle();
+  let connects=0,discoveries=0;
+  h.device.gatt.connect=async()=>{connects++;throw new DOMException('unavailable','NetworkError');};
+  h.device.gatt.getPrimaryServices=async()=>{discoveries++;return [];};
+  await h.connect();assert.equal(h.forgetCalls,0);
+  for(let i=0;i<3;i++){
+    await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+    assert.equal(h.forgetCalls,0);
+  }
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');await settle();
+  assert.equal(connects,5);assert.equal(discoveries,0);assert.equal(h.writes.length,0);
+  assert.equal(h.forgetCalls,1);assert.equal(h.chooserCalls.length,0);
+  assert.equal(h.run('bluetooth.session'),null);assert.equal(h.run('syncing'),false);
+  assert.match(h.element('log').textContent,/all connection retries failed; optional website permission reset requested/);
+});
+
+test('opt-in reset leaves permission intact after a transient connection failure recovers', async t=>{
+  const h=permissionHarness(t,{saved:{albumglow_forget_after_failure:'true'}});await settle();
+  const connect=h.device.gatt.connect;let attempts=0;
+  h.device.gatt.connect=async function(){if(++attempts===1)throw new DOMException('unavailable','NetworkError');return connect.call(this);};
+  await h.connect();
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');await settle();
+  assert.equal(h.device.gatt.connected,true);assert.equal(h.forgetCalls,0);
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),'mock');
+});
+
+test('opt-in reset does not revoke permission for service-discovery failures', async t=>{
+  const h=permissionHarness(t,{saved:{albumglow_forget_after_failure:'true'}});await settle();
+  h.device.gatt.getPrimaryServices=async()=>{throw new DOMException('discovery failed','NetworkError');};
+  await h.connect();
+  for(let i=0;i<4;i++)await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  await settle();assert.equal(h.forgetCalls,0);
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),'mock');
+  assert.match(h.element('btStatus').textContent,/Automatic retries stopped/);
+});
+
 test('brightness uses the unscaled color remembered for this controller after a reload', async t=>{
   fakeTime(t);
   const h=harness(t,{saved:{albumglow_last_rgb_v1:JSON.stringify({deviceId:'mock',rgb:[18,170,238]}),albumglow_brightness:'50'}});

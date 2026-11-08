@@ -148,6 +148,10 @@
       <summary>Advanced Bluetooth &amp; optional color tests</summary>
       <p class="tiny">Close Apollo Lighting on your phone and other Album Glow tabs before connecting.</p>
       <button id="changeDeviceBtn" type="button">Choose different lights</button>
+      <button id="forgetDeviceBtn" type="button">Forget saved lights</button>
+      <div id="forgetStatus" class="state" role="status"></div>
+      <label><input id="forgetAfterFailure" type="checkbox" style="width:auto;margin-right:8px">Forget this website’s device permission after all connection retries fail</label>
+      <p class="tiny">Optional recovery experiment. Forgetting stops sync and makes the next Connect Bluetooth click open Chrome’s chooser. It does not unpair the lights in ChromeOS or reset the OS Bluetooth cache. Spotify and color preferences are kept.</p>
       <label for="customService">Custom BLE service UUID (only if needed)</label>
       <input id="customService" placeholder="e.g. ffe0 or a full UUID" spellcheck="false">
       <label for="characteristic">Writable characteristic</label>
@@ -169,6 +173,8 @@ const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, writable=[], syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, grantedDevices=[], spotifyLoginPending=false;
+let forgettingDevice=false,bluetoothSelections=0,devicePermissionVersion=0;
+const forgottenLegacyDeviceIds=new Set();
 const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
 let manualColor=previousManualColor||'#FF0000', manualRequested=false;
 let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManualInputAt=-Infinity;
@@ -191,7 +197,7 @@ function rememberedLedColor(deviceId){
  }catch{ /* Ignore malformed or unavailable local color history. */ }
  // Migrate the last manual color saved by the previous version, only for the
  // controller that was remembered when this page loaded.
- if(deviceId===previousDeviceId && previousManualColor){
+ if(!forgottenLegacyDeviceIds.has(deviceId)&&deviceId===previousDeviceId && previousManualColor){
   try{return rgbFromHex(normalizeHex(previousManualColor))}catch{ /* invalid old value */ }
  }
  return null;
@@ -294,6 +300,9 @@ function saveSettings(){
  }catch(e){$('settingsStatus').textContent=e.message;$('clientId').focus()}
 }
 function renderStartup(){
+ $('btBtn').disabled=forgettingDevice||bluetoothSelections>0;
+ $('changeDeviceBtn').disabled=forgettingDevice;
+ $('forgetDeviceBtn').disabled=forgettingDevice;
  $('startupBtn').disabled=Boolean(startupRequest)||spotifyLoginPending||$('btBtn').disabled;
  $('startupBtn').textContent=spotifyLoginPending?'Signing in…':startupRequest?'Starting…':'Start Album Glow';
  $('spotifyBtn').disabled=spotifyLoginPending;
@@ -454,6 +463,15 @@ const bluetooth=new AlbumGlowBluetooth({
    $('startupStatus').textContent=message;
    if(message.startsWith('Automatic retries stopped')){startupRequest=null;renderStartup()}
   }
+  if(message.startsWith('Automatic retries stopped')&&$('forgetAfterFailure').checked){
+   const failed=bluetooth.session;
+   if(failed?.lastFailureStage?.startsWith('GATT connect')){
+    // Permission reset never runs mid-retry and never opens a background chooser.
+    Promise.resolve().then(()=>{
+     if(bluetooth.session===failed&&!failed.ready&&!forgettingDevice&&$('forgetAfterFailure').checked)forgetSavedLights({target:failed.device,automatic:true});
+    });
+   }
+  }
  },
  onClear:()=>{
   char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
@@ -499,7 +517,7 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
  if(!startup)cancelStartup();
  if(device?.gatt?.connected && char && !forceChooser)return true;
  const selection=++selectionGeneration;
- $('btBtn').disabled=true;renderStartup();
+ bluetoothSelections++;renderStartup();
  try{
   $('alert').textContent='';
   requireBluetoothAccess();
@@ -535,16 +553,98 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
   else err(Error('Bluetooth selection/setup — '+e.name+': '+e.message));
   if(startupRequest===startup)cancelStartup('Startup stopped. Check the connection log, then try again.');
   return false;
- }finally{$('btBtn').disabled=false;renderLedControls();renderStartup()}
+ }finally{bluetoothSelections--;renderLedControls();renderStartup()}
 }
 async function loadGrantedDevices(){
- if(!navigator.bluetooth?.getDevices)return;
+ if(forgettingDevice||!navigator.bluetooth?.getDevices)return;
+ const permissionVersion=devicePermissionVersion;
  try{
   const permitted=await navigator.bluetooth.getDevices();
+  if(permissionVersion!==devicePermissionVersion||forgettingDevice)return;
   // A chooser can finish before this preload. Keep its newer device objects.
   grantedDevices=[...grantedDevices,...permitted.filter(d=>!grantedDevices.some(current=>current.id===d.id))];
  }
  catch{log('BT: saved device access unavailable; the next Connect click will use the chooser')}
+}
+function clearSavedBluetoothDevice(id){
+ grantedDevices=grantedDevices.filter(d=>d.id!==id);
+ forgottenLegacyDeviceIds.add(id);
+ if(localStorage.getItem('albumglow_device')===id)localStorage.removeItem('albumglow_device');
+ for(const key of ['albumglow_ble_endpoint_v1','albumglow_last_rgb_v1']){
+  let saved;try{saved=JSON.parse(localStorage.getItem(key)||'null')}catch{localStorage.removeItem(key);continue}
+  if(saved?.deviceId===id)localStorage.removeItem(key);
+ }
+ lastLedRgb=null;lastLedDeviceId=null;manualRequested=false;brightnessRequested=false;
+}
+async function forgetSavedLights({target=null,automatic=false}={}){
+ if(forgettingDevice)return;
+ const savedId=localStorage.getItem('albumglow_device')||bluetooth.cachedEndpoint()?.deviceId;
+ target=target||bluetooth.session?.device||device||grantedDevices.find(d=>d.id===savedId);
+ forgettingDevice=true;devicePermissionVersion++;renderStartup();
+ let lease=null;
+ try{
+  log(automatic?'BT: all connection retries failed; optional website permission reset requested':'BT: forgetting saved lights for this website');
+  btDisconnect();
+  const resetGeneration=selectionGeneration;
+  const checkCurrent=()=>{if(resetGeneration!==selectionGeneration)throw bluetooth.cancelled()};
+  lastLedRgb=null;lastLedDeviceId=null;manualRequested=false;brightnessRequested=false;
+  $('forgetStatus').textContent='Waiting for pending Bluetooth work to finish…';
+  // Do not revoke permission while an old native connect/write can still finish.
+  await bluetooth.acquisition;
+  // A cancelled acquisition can install a new release barrier as it settles.
+  await Promise.all([bluetooth.operations,bluetooth.ownerBarrier]);
+  checkCurrent();
+  if(!target&&navigator.bluetooth?.getDevices){
+   const permitted=await navigator.bluetooth.getDevices();
+   checkCurrent();
+   target=permitted.find(d=>d.id===savedId)||(!savedId&&permitted.length===1?permitted[0]:null);
+   if(!target&&!savedId&&permitted.length>1)throw Error('More than one device is permitted. Choose the lights with Connect Bluetooth before forgetting them.');
+  }
+  if(!target){
+   if(savedId)clearSavedBluetoothDevice(savedId);
+   else{grantedDevices=[];localStorage.removeItem('albumglow_device');localStorage.removeItem('albumglow_ble_endpoint_v1');}
+   $('forgetStatus').textContent='Saved Bluetooth choice cleared. Click Connect Bluetooth to choose the lights again.';
+  }else{
+   if(bluetooth.ownership){
+    lease=await bluetooth.ownership.acquire(target.id);
+    checkCurrent();
+    if(!lease)throw Error('Another Album Glow tab is using these lights. Forget them from that tab, or disconnect it first.');
+   }
+   $('forgetStatus').textContent='Clearing this website’s saved lights…';
+   clearSavedBluetoothDevice(target.id);
+   let revoked=false;
+   if(typeof target.forget==='function'){
+    await target.forget();
+    checkCurrent();
+    // Chromium can silently decline ForgetDevice; check permission when possible.
+    if(navigator.bluetooth?.getDevices){
+     const permitted=await navigator.bluetooth.getDevices();
+     checkCurrent();
+     revoked=!permitted.some(d=>d.id===target.id);
+    }
+   }
+   $('forgetStatus').textContent=revoked?
+    'Saved lights and website permission forgotten. Click Connect Bluetooth and choose the lights again.':
+    'Saved Bluetooth choice cleared. Chrome’s device permission could not be confirmed removed; Connect Bluetooth will open the chooser again.';
+  }
+  $('btStatus').textContent='Choose lights again with Connect Bluetooth';
+  $('startupStatus').textContent='Bluetooth setup cleared for this website. Spotify and color preferences are kept.';
+  $('manualStatus').textContent='Connect Bluetooth to apply a color.';
+  log('BT: '+$('forgetStatus').textContent+' ChromeOS pairing was not changed.');
+ }catch(e){
+  if(e.name==='AbortError'){
+   $('forgetStatus').textContent='Bluetooth reset cancelled.';
+   log('BT: '+$('forgetStatus').textContent);
+  }else{
+   $('forgetStatus').textContent='Could not forget the website device: '+e.message;
+   err(e);
+  }
+ }finally{
+  // Use the same release barrier as connections: a release failure must fence
+  // subsequent claims instead of letting the page silently bypass ownership.
+  if(lease){try{await bluetooth.releaseOwnership({lease})}catch(e){$('forgetStatus').textContent='Device reset finished, but tab ownership could not be released: '+e.message;err(e)}}
+  forgettingDevice=false;devicePermissionVersion++;renderStartup();renderLedControls();
+ }
 }
 function enableColorTests(enabled){
  for(const id of ['testBtn','testGreen','testBlue'])$(id).disabled=!enabled;
@@ -747,6 +847,9 @@ $('logoutSpotifyBtn').onclick=spotifyLogout;
 enableColorTests(false);
 $('btBtn').onclick=()=>pickBluetooth();
 $('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickBluetooth({forceChooser:true}) };
+$('forgetDeviceBtn').onclick=()=>forgetSavedLights();
+$('forgetAfterFailure').checked=localStorage.getItem('albumglow_forget_after_failure')==='true';
+$('forgetAfterFailure').onchange=()=>localStorage.setItem('albumglow_forget_after_failure',String($('forgetAfterFailure').checked));
 $('startupBtn').onclick=startAlbumGlow;
 $('btDisconnectBtn').onclick=btDisconnect;
 globalThis.addEventListener('pagehide',btDisconnect);

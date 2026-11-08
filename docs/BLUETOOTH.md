@@ -43,6 +43,16 @@ Use the reviewed update on an HTTPS address. Manual Bluetooth tests can run on a
 9. To test recovery intentionally, briefly remove controller power, restore it before the retry budget ends, and observe the log. This may not recover on every firmware/OS combination; report the exact result. Do not use the website's Disconnect button for this particular test: that button intentionally cancels recovery.
 10. Click **Disconnect lights**. Verify it stays disconnected and sync stops. Reconnect by choosing the controller, manually test/confirm again, and restart sync.
 
+## Optional website permission reset
+
+If you want to compare a fresh website permission with the saved one, open **Settings → Advanced Bluetooth & optional color tests → Forget saved lights**. Wait for the result, close Settings, then click **Connect Bluetooth** and choose the Apollo controller again. Manual color tests need no Spotify sign-in. This clears this website's saved device and, when Chrome supports it, requests removal of its device permission. It does **not** remove ChromeOS pairing or reset the native Bluetooth cache. If Chrome retains permission or removal cannot be verified, the page says so.
+
+The reset stops sync and waits for old connection/write operations to finish before revoking permission. It refuses to reset lights currently owned by another cooperating tab on this origin. Spotify settings and general color/brightness preferences are retained; the selected controller's verified endpoint and last-command RGB history are cleared. A later Connect opens the chooser directly from your click.
+
+You can opt into **Forget this website’s device permission after all connection retries fail** in that section. It is off by default and runs only after all four retries fail at GATT connect. It never opens a chooser in the background or resets an otherwise recovering connection. Afterward, use Connect Bluetooth for manual colors or Start Album Glow to resume Spotify sync. Leave this option off if forgetting provides no improvement; success on one attempt cannot establish that permission caused intermittent native failures.
+
+The user reported different symbols and Pair/Connect wording in Chrome's chooser. The inspected Chromium version uses an already-connected Bluetooth icon when the native GATT connection exists, otherwise signal-strength indicators. A triangle-like symbol may be signal strength, not a damaged saved record. Website permission, OS pairing, and native connection state are different things; forgetting permission cannot force an already-connected state. See the [source-backed explanation](BLUETOOTH-INVESTIGATION.md#chromes-chooser-and-forgetting-permission).
+
 ## If it fails, send this information
 
 Copy the **visible Album Glow Connection log** immediately after the failure (it retains the last 300 lines), from device selection through the last retry. Also provide:
