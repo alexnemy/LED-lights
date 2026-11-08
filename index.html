@@ -158,6 +158,7 @@
     </details>
   </dialog>
 </main>
+<script src="bluetooth-ownership.js"></script>
 <script src="bluetooth.js"></script>
 <script>
 'use strict';
@@ -515,11 +516,18 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
   const picked=await picking;
   if(selection!==selectionGeneration){log('BT: ignored device selection after Disconnect');return false}
   log('BT: device selection complete: '+picked.name);
-  stopSync({cancelPendingStartup:false});$('confirmed').checked=false;
-  device=picked;
   localStorage.setItem('albumglow_device',picked.id);
   grantedDevices=[picked,...grantedDevices.filter(d=>d.id!==picked.id)];
   if(startup)startup.deviceId=picked.id;
+  // The old session may already be ready, including after an automatic retry
+  // while the chooser was open. Selecting it again must not drop that link.
+  if(device?.id===picked.id && device.gatt?.connected && char && bluetooth.session?.ready){
+   log('BT: selected lights are already ready; keeping the existing connection');
+   if(startupRequest===startup)completeStartup();
+   return true;
+  }
+  stopSync({cancelPendingStartup:false});$('confirmed').checked=false;
+  device=picked;
   await bluetooth.useDevice(picked);
   return Boolean(char && picked.gatt.connected);
  }catch(e){
@@ -531,7 +539,11 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
 }
 async function loadGrantedDevices(){
  if(!navigator.bluetooth?.getDevices)return;
- try{grantedDevices=await navigator.bluetooth.getDevices()}
+ try{
+  const permitted=await navigator.bluetooth.getDevices();
+  // A chooser can finish before this preload. Keep its newer device objects.
+  grantedDevices=[...grantedDevices,...permitted.filter(d=>!grantedDevices.some(current=>current.id===d.id))];
+ }
  catch{log('BT: saved device access unavailable; the next Connect click will use the chooser')}
 }
 function enableColorTests(enabled){
@@ -737,6 +749,7 @@ $('btBtn').onclick=()=>pickBluetooth();
 $('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickBluetooth({forceChooser:true}) };
 $('startupBtn').onclick=startAlbumGlow;
 $('btDisconnectBtn').onclick=btDisconnect;
+globalThis.addEventListener('pagehide',btDisconnect);
 $('characteristic').onchange=()=>{
  try{cancelStartup();char=bluetooth.select(Number($('characteristic').value));renderLedControls()}catch(e){err(e)}
 };
