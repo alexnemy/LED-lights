@@ -9,6 +9,9 @@ const helper = fs.readFileSync(require.resolve('../bluetooth.js'),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 function harness(t, {search='', session={}, saved={}, requestDevice, getDevices, fetch:fetchOverride}={}) {
   const elements=new Map(), writes=[], requests=[], redirects=[], chooserCalls=[];
+  const windowEvents={},documentEvents={};
+  const listen=(events,type,listener)=>(events[type]??=[]).push(listener);
+  const dispatch=(events,type,event={})=>{for(const listener of events[type]||[])listener(event);};
   const storage = (seed={}) => {const data=new Map(Object.entries(seed));return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};};
   const element = id => {
     if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,textContent:'',style:{},classList:{toggle(){}},
@@ -24,7 +27,8 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
       async getPrimaryService(){return {uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristic(){return c;}};}}};
   const sandbox={console,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
     btoa:s=>Buffer.from(s,'binary').toString('base64'),setTimeout,clearTimeout,
-    document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener(){},hidden:false},
+    addEventListener:(type,listener)=>listen(windowEvents,type,listener),
+    document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener:(type,listener)=>listen(documentEvents,type,listener),hidden:false},
     localStorage:storage(saved),sessionStorage:storage(session),
     navigator:{bluetooth:{requestDevice:(...args)=>{chooserCalls.push(args);return requestDevice?requestDevice(...args):Promise.resolve(device);},...(getDevices?{getDevices:()=>getDevices(device)}:{})}},
     location:{origin:'https://cosmic-snickerdoodle-3a661b.netlify.app',pathname:'/',protocol:'https:',search,assign:url=>redirects.push(url)},
@@ -35,7 +39,9 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
   const run=code=>vm.runInContext(code,context);
   run('bluetooth.writeGap=0');
   t.after(()=>run('btDisconnect()'));
-  return {context,run,element,writes,requests,redirects,device,c,chooserCalls,async connect(){await run('pickBluetooth()');}};
+  return {context,run,element,writes,requests,redirects,device,c,chooserCalls,
+    dispatchWindow:(type,event)=>dispatch(windowEvents,type,event),dispatchDocument:(type,event)=>dispatch(documentEvents,type,event),
+    async connect(){await run('pickBluetooth()');}};
 }
 
 test('production scripts parse and page loads with the same HTTPS redirect and configurable Client ID', t=>{
@@ -344,6 +350,93 @@ test('Choose different lights bypasses the stored grant and requests fresh permi
   const h=harness(t,{saved:{albumglow_device:'mock'},getDevices:device=>Promise.resolve([device])});
   await settle();await h.connect();assert.equal(h.chooserCalls.length,0);
   await h.run('pickBluetooth({forceChooser:true})');assert.equal(h.chooserCalls.length,1);
+});
+
+test('choosing the already-ready controller keeps its session, characteristics, and Spotify sync', async t=>{
+  fakeTime(t);const h=harness(t,{saved:savedSpotify()});await h.connect();
+  h.run('startSync()');h.element('confirmed').checked=true;
+  const session=h.run('bluetooth.session'),characteristic=h.run('char');
+  let connects=0,disconnects=0;
+  h.device.gatt.connect=async()=>{connects++;throw Error('Existing connection must be reused');};
+  const disconnect=h.device.gatt.disconnect;
+  h.device.gatt.disconnect=function(){disconnects++;return disconnect.call(this);};
+  // Chrome may return another wrapper for the same permitted device ID.
+  const picked={...h.device,gatt:{connected:false,connect:()=>{throw Error('Do not replace the ready wrapper');}}};
+  h.context.navigator.bluetooth.requestDevice=async()=>picked;
+  assert.equal(await h.run('pickBluetooth({forceChooser:true})'),true);
+  assert.equal(h.run('bluetooth.session'),session);assert.equal(h.run('device'),h.device);
+  assert.equal(h.run('char'),characteristic);assert.equal(h.run('syncing'),true);
+  assert.equal(h.element('confirmed').checked,true);assert.equal(connects,0);assert.equal(disconnects,0);
+});
+
+test('an old-session recovery during a pending chooser completes startup without reconnecting again', async t=>{
+  fakeTime(t);const h=harness(t,{saved:savedSpotify()});await h.connect();
+  const session=h.run('bluetooth.session');let connects=0,finish;
+  const connect=h.device.gatt.connect;
+  h.device.gatt.connect=function(){connects++;return connect.call(this);};
+  h.device.gatt.disconnect();
+  h.context.navigator.bluetooth.requestDevice=()=>new Promise(resolve=>{finish=resolve;});
+  h.run('startupRequest={deviceId:null}');
+  const pick=h.run('pickBluetooth({startup:startupRequest,forceChooser:true})');
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  assert.notEqual(h.run('startupRequest'),null);
+  finish(h.device);assert.equal(await pick,true);
+  assert.equal(h.run('bluetooth.session'),session);assert.equal(connects,1);
+  assert.equal(h.run('startupRequest'),null);assert.equal(h.run('syncing'),true);
+});
+
+test('choosing a different controller still replaces the old session and stops its Spotify sync', async t=>{
+  fakeTime(t);const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('startSync()');
+  const oldSession=h.run('bluetooth.session');h.element('confirmed').checked=true;
+  const picked={...h.device,id:'second-controller',gatt:{...h.device.gatt,connected:false}};
+  h.context.navigator.bluetooth.requestDevice=async()=>picked;
+  assert.equal(await h.run('pickBluetooth({forceChooser:true})'),true);
+  assert.notEqual(h.run('bluetooth.session'),oldSession);assert.equal(h.run('device'),picked);
+  assert.equal(h.device.gatt.connected,false);assert.equal(picked.gatt.connected,true);
+  assert.equal(h.run('syncing'),false);assert.equal(h.element('confirmed').checked,false);
+});
+
+test('a late saved-device preload preserves newer chooser grants and device objects', async t=>{
+  let finish;const h=harness(t,{getDevices:()=>new Promise(resolve=>{finish=resolve;})});
+  await h.connect();assert.equal(h.chooserCalls.length,1);
+  const olderWrapper={...h.device,gatt:{connected:false}};
+  finish([olderWrapper,{id:'another-approved-device'}]);await settle();
+  assert.equal(h.run('grantedDevices.find(d=>d.id==="mock")'),h.device);
+  assert.equal(h.run('grantedDevices.length'),2);
+  h.run('btDisconnect()');await h.connect();
+  assert.equal(h.chooserCalls.length,1);assert.equal(h.device.gatt.connected,true);
+});
+
+test('leaving the page cancels pending startup and ignores a late chooser result', async t=>{
+  let finish;const h=harness(t,{saved:savedSpotify(),requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
+  const startup=h.run('startAlbumGlow()');assert.notEqual(h.run('startupRequest'),null);
+  h.dispatchWindow('pagehide',{persisted:true});
+  assert.equal(h.run('startupRequest'),null);assert.equal(h.run('syncing'),false);
+  finish(h.device);await startup;
+  assert.equal(h.device.gatt.connected,false);assert.equal(h.run('bluetooth.session'),null);
+});
+
+test('leaving a connected page cancels live color and brightness timers without retrying', async t=>{
+  fakeTime(t);const h=harness(t);await h.connect();
+  h.run('setLedBrightness(40);queueManualColor("#00FF00")');
+  assert.notEqual(h.run('brightnessTimer'),null);assert.notEqual(h.run('manualInputTimer'),null);
+  h.dispatchWindow('pagehide');t.mock.timers.tick(60000);await settle();
+  assert.equal(h.run('brightnessTimer'),null);assert.equal(h.run('manualInputTimer'),null);
+  assert.equal(h.run('pendingManualInput'),null);assert.equal(h.run('char'),null);
+  assert.equal(h.run('bluetooth.session'),null);assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.writes.length,0);
+});
+
+test('leaving a syncing page clears its poll while visibility changes keep Bluetooth connected', async t=>{
+  fakeTime(t);const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('startSync()');
+  const characteristic=h.run('char');
+  h.context.document.hidden=true;h.dispatchDocument('visibilitychange');
+  h.context.document.hidden=false;h.dispatchDocument('visibilitychange');
+  assert.equal(h.device.gatt.connected,true);assert.equal(h.run('char'),characteristic);
+  assert.equal(h.run('syncing'),true);assert.notEqual(h.run('syncTimer'),null);
+  h.dispatchWindow('pagehide');
+  assert.equal(h.run('syncing'),false);assert.equal(h.run('syncTimer'),null);
+  assert.equal(h.device.gatt.connected,false);
 });
 
 test('stale JSON decoding cannot mark manual mode as Spotify syncing', async t=>{

@@ -220,3 +220,119 @@ test('one inaccessible service does not hide other writable characteristics', as
   await f.bt.useDevice(f.device);assert.equal(f.ready,1);
   assert.ok(f.messages.some(x=>x.includes('skipping unavailable')));
 });
+
+// Separate helper instances model separate tabs; native counters prove that a
+// losing page never attempts to connect or disconnect another page's device.
+function owners() {
+  const held=new Map(),events=[];
+  return {held,events,async acquire(id){
+    if(held.has(id))return null;
+    const token={};held.set(id,token);events.push('acquire:'+id);
+    return {supported:true,async release(){
+      if(held.get(id)===token){held.delete(id);events.push('release:'+id);}
+    }};
+  }};
+}
+
+test('a second page is refused before any native GATT operation and can connect after release', async()=>{
+  const ownership=owners(),first=fixture({ownership}),second=fixture({ownership});
+  await first.bt.useDevice(first.device);
+  await assert.rejects(second.bt.useDevice(second.device),/Another Album Glow tab/);
+  assert.deepEqual(second.calls,[]);assert.equal(second.events.size,0);assert.equal(second.bt.session,null);
+  first.bt.disconnect();await first.bt.ownerBarrier;
+  await second.bt.useDevice(second.device);assert.equal(second.ready,1);
+  second.bt.disconnect();await second.bt.ownerBarrier;assert.equal(ownership.held.size,0);
+});
+
+test('Disconnect keeps ownership until a cancelled native connect and its late cleanup settle', async()=>{
+  const ownership=owners(),first=fixture({ownership}),second=fixture({ownership}),gate=deferred();
+  first.device.gatt.connect=async function(){first.calls.push('connect');await gate.promise;this.connected=true;return this;};
+  const pending=first.bt.useDevice(first.device);await settle();
+  first.bt.disconnect();assert.equal(ownership.held.size,1);
+  await assert.rejects(second.bt.useDevice(second.device),/Another Album Glow tab/);assert.deepEqual(second.calls,[]);
+  gate.resolve();await pending;await first.bt.ownerBarrier;
+  assert.equal(first.device.gatt.connected,false);assert.equal(ownership.held.size,0);
+  assert.deepEqual(first.calls,['connect','disconnect','disconnect']);
+  await second.bt.useDevice(second.device);assert.equal(second.ready,1);
+  second.bt.disconnect();await second.bt.ownerBarrier;
+});
+
+test('Disconnect holds ownership through an in-flight native write before another page can connect', async()=>{
+  const ownership=owners(),first=fixture({ownership}),second=fixture({ownership}),gate=deferred();
+  await first.bt.useDevice(first.device);
+  first.bt.session.characteristic.writeValueWithoutResponse=()=>gate.promise;
+  const write=assert.rejects(first.bt.write([1]),{name:'AbortError'});await settle();
+  first.bt.disconnect();assert.equal(ownership.held.size,1);
+  await assert.rejects(second.bt.useDevice(second.device),/Another Album Glow tab/);assert.deepEqual(second.calls,[]);
+  gate.resolve();await write;await first.bt.ownerBarrier;
+  await second.bt.useDevice(second.device);assert.equal(second.ready,1);
+  second.bt.disconnect();await second.bt.ownerBarrier;
+});
+
+test('cancelling before an ownership grant never touches GATT and releases a late lease', async()=>{
+  const ownership=owners(),f=fixture({ownership}),gate=deferred(),acquire=ownership.acquire.bind(ownership);
+  ownership.acquire=async id=>{await gate.promise;return acquire(id);};
+  const pending=f.bt.useDevice(f.device);await settle();f.bt.disconnect();
+  assert.deepEqual(f.calls,[]);gate.resolve();await pending;await f.bt.ownerBarrier;
+  assert.equal(ownership.held.size,0);assert.deepEqual(f.calls,[]);
+});
+
+test('replacement during pending ownership acquisition waits for old grant release instead of self-contention', async()=>{
+  const ownership=owners(),f=fixture({ownership}),gate=deferred(),acquire=ownership.acquire.bind(ownership);let count=0;
+  ownership.acquire=async id=>{if(++count===1)await gate.promise;return acquire(id);};
+  const first=f.bt.useDevice(f.device);await settle();const next=f.bt.useDevice(f.device);await settle();
+  assert.deepEqual(f.calls,[]);gate.resolve();await Promise.all([first,next]);
+  assert.equal(f.ready,1);assert.deepEqual(ownership.events,['acquire:test-device','release:test-device','acquire:test-device']);
+  f.bt.disconnect();await f.bt.ownerBarrier;
+});
+
+test('same-page replacement waits for cancelled connect and lock release before native reconnect', async()=>{
+  const ownership=owners(),f=fixture({ownership}),gate=deferred(),connect=f.device.gatt.connect;let count=0;
+  f.device.gatt.connect=async function(){if(++count===1)await gate.promise;return connect.call(this);};
+  const first=f.bt.useDevice(f.device);await settle();const next=f.bt.useDevice(f.device);await settle();
+  assert.equal(count,1);gate.resolve();await Promise.all([first,next]);
+  assert.equal(count,2);assert.equal(f.ready,1);assert.equal(f.device.gatt.connected,true);
+  f.bt.disconnect();await f.bt.ownerBarrier;
+});
+
+test('repeated native connect failures call zero discovery/write methods and release ownership after exhaustion', async()=>{
+  const ownership=owners(),f=fixture({ownership}),other=fixture({ownership});let count=0;
+  f.device.gatt.connect=async()=>{count++;throw new DOMException('Unknown error when connecting to the device.','NetworkError');};
+  await f.bt.useDevice(f.device);
+  for(const delay of [1000,2000,4000,8000])await f.timers.advance(delay);
+  await f.bt.ownerBarrier;assert.equal(count,5);assert.deepEqual(f.calls,[]);assert.deepEqual(f.writes,[]);
+  assert.equal(f.timers.jobs.size,0);assert.equal(ownership.held.size,0);
+  assert.match(f.messages.at(-1),/Chrome could not establish/);
+  await other.bt.useDevice(other.device);f.bt.disconnect();assert.deepEqual(f.calls,[]);
+  assert.equal(other.device.gatt.connected,true);
+  other.bt.disconnect();await other.bt.ownerBarrier;
+});
+
+test('ownership API denial fails closed before native connect or disconnect and does not retry', async()=>{
+  const f=fixture({ownership:{async acquire(){throw new DOMException('Ownership denied','SecurityError');}}});
+  await assert.rejects(f.bt.useDevice(f.device),{name:'SecurityError'});
+  assert.deepEqual(f.calls,[]);assert.equal(f.events.size,0);assert.equal(f.timers.jobs.size,0);
+});
+
+test('independent controllers can be owned by independent pages', async()=>{
+  const ownership=owners(),first=fixture({ownership}),second=fixture({ownership});second.device.id='another-controller';
+  await Promise.all([first.bt.useDevice(first.device),second.bt.useDevice(second.device)]);
+  assert.equal(first.ready,1);assert.equal(second.ready,1);assert.equal(ownership.held.size,2);
+  first.bt.disconnect();second.bt.disconnect();await Promise.all([first.bt.ownerBarrier,second.bt.ownerBarrier]);
+});
+
+test('an ownership release failure is reported and prevents a silent unsafe reconnect', async()=>{
+  const failure=new Error('Release failed'),f=fixture({ownership:{async acquire(){return{supported:true,async release(){throw failure;}};}}});
+  await f.bt.useDevice(f.device);f.bt.disconnect();await assert.rejects(f.bt.ownerBarrier,error=>error===failure);
+  await assert.rejects(f.bt.useDevice(f.device),error=>error===failure);
+  assert.equal(f.calls.filter(c=>c==='connect').length,1);
+  assert.ok(f.messages.some(m=>m.includes('ownership could not be released')));
+});
+
+test('superseded acquisition release failures fence subsequent claims', async()=>{
+  const gate=deferred(),failure=new Error('Stale grant failed to release');let claims=0;
+  const f=fixture({ownership:{async acquire(){claims++;await gate.promise;return{supported:true,async release(){throw failure;}};}}});
+  const first=f.bt.useDevice(f.device);await settle();const next=f.bt.useDevice(f.device);await settle();
+  const failed=assert.rejects(next,error=>error===failure);gate.resolve();await Promise.all([first,failed]);
+  assert.equal(claims,1);assert.deepEqual(f.calls,[]);assert.equal(f.bt.session,null);
+});

@@ -5,15 +5,18 @@ class AlbumGlowBluetooth {
   constructor({log = () => {}, onState = () => {}, onReady = () => {},
     onClear = () => {}, onUnconfirmed = () => {}, storage = null,
     timers = globalThis, now = () => Date.now(), writeGap = 100,
-    stableMs = 30000} = {}) {
+    stableMs = 30000,
+    ownership = typeof AlbumGlowTabOwnership === 'function' ? new AlbumGlowTabOwnership() : null} = {}) {
     Object.assign(this, {log, onState, onReady, onClear, onUnconfirmed,
-      storage, timers, now, writeGap, stableMs});
+      storage, timers, now, writeGap, stableMs, ownership});
     this.session = null;
     this.operations = Promise.resolve();
     this.pending = [];
     this.pumping = false;
     this.lastWriteAt = -Infinity;
     this.cacheKey = 'albumglow_ble_endpoint_v1';
+    this.ownerBarrier = Promise.resolve();
+    this.acquisition = Promise.resolve();
   }
 
   cachedEndpoint() {
@@ -62,6 +65,42 @@ class AlbumGlowBluetooth {
     for (const command of this.pending.splice(0)) command.reject(this.cancelled());
   }
 
+  acquireOwnership(s) {
+    // A superseded acquisition must release its lease before the next one tries
+    // ifAvailable. Otherwise this page can accidentally contend with itself.
+    const acquire = this.acquisition.then(async () => {
+      await this.ownerBarrier;
+      if (!this.active(s)) return null;
+      const lease = await this.ownership.acquire(s.device.id);
+      if (!this.active(s)) {
+        if (lease) {
+          s.lease = lease;
+          await this.releaseOwnership(s);
+        }
+        return null;
+      }
+      s.lease = lease;
+      return lease;
+    });
+    this.acquisition = acquire.then(() => {}, () => {});
+    return acquire;
+  }
+
+  releaseOwnership(s) {
+    const lease = s.lease;
+    if (!lease) return this.ownerBarrier;
+    s.lease = null;
+    // Disconnect invalidates pending work immediately, but a native promise may
+    // still settle late. Keep ownership until its cleanup has finished; never
+    // let a second page connect while that native operation is outstanding.
+    const release = this.operations.then(() => lease.release());
+    this.ownerBarrier = Promise.all([this.ownerBarrier, release]).then(() => {});
+    // Keep a failed barrier rejected so we cannot silently bypass ownership,
+    // while also handling it if the user simply disconnects and leaves.
+    this.ownerBarrier.catch(error => this.log('BT: controller ownership could not be released — ' + error.message));
+    return release;
+  }
+
   disconnect() {
     const s = this.session;
     if (!s) return;
@@ -71,7 +110,8 @@ class AlbumGlowBluetooth {
     this.clear(s);
     // Disconnect also aborts an in-flight connect on Chrome. The lane still waits
     // for that promise before starting a new session, even for the same device.
-    s.device.gatt.disconnect();
+    if (s.started && (!this.ownership || s.lease)) s.device.gatt.disconnect();
+    this.releaseOwnership(s);
     this.onState('Disconnected by you');
   }
 
@@ -80,7 +120,7 @@ class AlbumGlowBluetooth {
     const cached = this.cachedEndpoint();
     const s = {device, generation: 0, attempts: 0, busy: false, ready: false,
       retryTimer: null, stableTimer: null, entries: [], characteristic: null, started: false,
-      verified: cached?.deviceId === device.id,
+      verified: cached?.deviceId === device.id, lease: null,
       endpoint: cached?.deviceId === device.id ? cached : null};
     this.session = s;
     s.onDrop = () => {
@@ -91,13 +131,35 @@ class AlbumGlowBluetooth {
       if (!s.busy) this.queueReconnect(s);
     };
     device.addEventListener('gattserverdisconnected', s.onDrop);
+    if (this.ownership) {
+      try {
+        const lease = await this.acquireOwnership(s);
+        if (!this.active(s)) return;
+        if (!lease) throw new Error('Another Album Glow tab is using these lights. Use that tab, or disconnect its lights before connecting here.');
+        this.log(lease.supported ? 'BT: this tab reserved the controller on this website' :
+          'BT: this browser cannot coordinate Bluetooth ownership between tabs');
+      } catch (error) {
+        if (!this.active(s)) return;
+        this.session = null;
+        device.removeEventListener('gattserverdisconnected', s.onDrop);
+        this.clear(s);
+        this.releaseOwnership(s);
+        this.onState(error.message);
+        throw error;
+      }
+    }
     await this.connect(s);
   }
 
   queueReconnect(s) {
     if (!this.active(s) || s.retryTimer !== null) return;
     if (s.attempts >= 4) {
-      this.onState('Automatic retries stopped after 4 attempts. Close other controller apps, then use Choose Apollo lights.');
+      s.started = false;
+      this.releaseOwnership(s);
+      const reason = s.lastFailureStage?.startsWith('GATT connect') ?
+        ' Chrome could not establish the controller connection, before Album Glow could discover characteristics or send LED commands.' :
+        ' The Bluetooth link could not be kept ready.';
+      this.onState('Automatic retries stopped after 4 attempts.' + reason);
       return;
     }
     const seconds = 2 ** s.attempts++;
@@ -109,7 +171,7 @@ class AlbumGlowBluetooth {
   }
 
   async connect(s) {
-    if (!this.active(s) || s.busy) return;
+    if (!this.active(s) || s.busy || (this.ownership && !s.lease)) return;
     s.busy = true;
     const generation = s.generation;
     let failed = false;
@@ -187,6 +249,7 @@ class AlbumGlowBluetooth {
         this.onReady({device: s.device, entries, index});
         this.onState('Ready: ' + s.device.name);
         s.stage = null;
+        s.lastFailureStage = null;
         // Brief successful connections do not reset the failure budget.
         s.stableTimer = this.timers.setTimeout(() => {
           if (this.active(s, generation) && s.ready && s.device.gatt.connected) {
@@ -197,6 +260,7 @@ class AlbumGlowBluetooth {
       } catch (error) {
         if (this.session !== s) return;
         failed = true;
+        s.lastFailureStage = s.stage;
         this.log('BT: FAILED at ' + s.stage + ' — ' + error.name + ': ' + error.message);
         this.clear(s);
         // Our intentional cleanup is distinguishable from a remote disconnect.
