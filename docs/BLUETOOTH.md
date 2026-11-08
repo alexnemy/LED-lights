@@ -1,5 +1,7 @@
 # Bluetooth findings and hardware testing
 
+For the completed code audit and version-matched Chromium evidence, read [Bluetooth connection investigation](BLUETOOTH-INVESTIGATION.md). It distinguishes the native connection failure from the application safeguards fixed during the audit.
+
 ## What the source actually showed
 
 | Finding in the imported version | Targeted change |

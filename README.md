@@ -8,8 +8,8 @@ Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. I
 
 ## Current review status
 
-- The original ZIP remains unchanged in Git history at `2e642fc`. The Bluetooth reliability update was merged through PR #1.
-- `one-click-and-manual-colors` is the review branch for the simpler daily controls. Review its preview before merging or releasing; pushing this branch does not replace the production site.
+- The original ZIP remains unchanged in Git history at `2e642fc`. The original Bluetooth update and simpler controls were merged through PRs #1 and #2.
+- `bluetooth-connection-audit` is the review branch for the connection audit and targeted safeguards. See [the investigation and source evidence](docs/BLUETOOTH-INVESTIGATION.md). Pushing it does not replace the production site.
 - The owner reported a successful 15-minute manual color test, followed by intermittent connection failures in other attempts. This is useful hardware evidence, not proof that the original stability problem is fully resolved. Automated tests use simulated devices and Spotify responses.
 - Follow [deployment instructions](docs/DEPLOYMENT.md) to publish to the same existing site, with its unchanged redirect URI.
 
@@ -57,11 +57,11 @@ Brightness is **0–100% RGB scaling**, not the controller's separate hardware b
 
 The first unverified discovery still inspects the original set of permitted services, plus an optional custom service. `optionalServices` grants browser permission; it does not itself query those services. Broad discovery is reduced **after visual verification**, rather than assuming a UUID from a similar controller. Write-without-response remains preferred when advertised, matching the original app. That mode does not prove the firmware applied a command.
 
-See [the findings and Chromebook test guide](docs/BLUETOOTH.md) for the original issues, remaining hypotheses, and precise diagnostics to collect.
+See [the full connection investigation](docs/BLUETOOTH-INVESTIGATION.md) for the audit verdict and pinned Chromium source evidence. The [hardware guide](docs/BLUETOOTH.md) documents optional acceptance checks; the audit does not require another reset-and-retry cycle to establish its conclusions.
 
 ## Developing with Codex
 
-Open **alexnemy/LED-lights** in Codex. Use `one-click-and-manual-colors` while the simpler-control update is under review. Future changes can branch from the reviewed version. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
+Open **alexnemy/LED-lights** in Codex. Use `bluetooth-connection-audit` while the connection audit is under review. Future changes can branch from the reviewed version. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
 
 The application has no runtime packages. Development and automated tests need **Node.js 24** (Node 22+ supports the test command); no `npm install` is needed.
 
@@ -73,7 +73,9 @@ npm run build
 
 `npm test` runs dependency-free Node tests against the GATT helper and actual inline page script, with fake Bluetooth, storage, Spotify responses, and timers. They cover session isolation, retry limits, write serialization/cancellation, endpoint caching, resuming sync, RGB/brightness/power frames, PKCE parameters, refresh tokens, and rate-limit behavior. These are simulations, not hardware or authenticated Spotify integration tests. `--test-isolation=none` keeps the runner compatible with restricted cloud process sandboxes; each page fixture still uses its own VM context.
 
-`npm run build` copies the two browser files into `dist/`. It does not bundle or rewrite the app. For a local layout-only check, serve `dist/` with any static HTTP server, for example `python3 -m http.server 8000 --directory dist`. The app intentionally requires HTTPS for Spotify sign-in; the local page is not an alternative redirect. HTTPS Netlify previews can test manual Bluetooth, but Spotify login on a different hostname will not match the production redirect registration. Do not change the registered redirect just to test a preview.
+`npm run build` copies the three browser files into `dist/`. It does not bundle or rewrite the app. For a local layout-only check, serve `dist/` with any static HTTP server, for example `python3 -m http.server 8000 --directory dist`. The app intentionally requires HTTPS for Spotify sign-in; the local page is not an alternative redirect. HTTPS Netlify previews can test manual Bluetooth, but Spotify login on a different hostname will not match the production redirect registration. Do not change the registered redirect just to test a preview.
+
+Album Glow uses native Web Locks to prevent two tabs on the same website from controlling one device at the same time. A blocked tab makes no Bluetooth calls and asks you to use or disconnect the existing owner. Ownership stays reserved until cancelled native operations settle. Preview and production URLs, other profiles, and other apps cannot share this safeguard. An already-connected controller selected again is reused, and leaving the page cancels its connection; backgrounding it does not.
 
 GitHub Actions runs tests and the static build on pushes and pull requests. The Netlify configuration runs the same checks before building. No service processes need to run in a Codex task just to edit or test this static site.
 
@@ -83,6 +85,7 @@ GitHub Actions runs tests and the static build on pushes and pull requests. The 
 | --- | --- |
 | `index.html` | Original UI, Spotify PKCE, polling, color extraction, LED controls |
 | `bluetooth.js` | Focused GATT session and write queue helper |
+| `bluetooth-ownership.js` | Per-device ownership between tabs on the same website |
 | `tests/*.test.cjs` | Automated simulations of the helper and page integration |
 | `scripts/build.cjs` | Copy only browser files into `dist/` |
 | `netlify.toml` | Free static build settings; no new site or redirect |
@@ -90,13 +93,13 @@ GitHub Actions runs tests and the static build on pushes and pull requests. The 
 | `docs/BLUETOOTH.md` | Findings, hardware checks, and diagnostic collection |
 | `README.txt` | Unchanged historical instructions imported from the ZIP |
 
-Deploy **both** `index.html` and `bluetooth.js`. The historical README.txt described a single-file deployment; that instruction applies to the original commit only. Prefer the built `dist/` folder for the updated version.
+Deploy **all three** browser files: `index.html`, `bluetooth-ownership.js`, and `bluetooth.js`. The historical README.txt described a single-file deployment; that instruction applies to the original commit only. Prefer the built `dist/` folder for the updated version.
 
 ## Privacy and configuration
 
 Spotify uses Authorization Code with PKCE, with the existing `user-read-currently-playing` scope. Access/refresh tokens stay in this browser's local storage and are sent to Spotify when required. There is no token backend. Like the original app, browser storage is not encrypted storage: use a trusted device. Disconnect Spotify to remove its saved tokens; revoke app access in Spotify if needed.
 
-Client ID, brightness, vivid mode, and polling interval retain their original storage keys. New Bluetooth endpoint data is local to the site/browser and contains no Spotify tokens. A new hostname or browser profile has separate storage. Logs are capped at 300 lines and do not intentionally log token values or OAuth URLs. Do not commit browser storage exports, tokens, `.env` files, or screenshots containing account details. The build only publishes the two browser files.
+Client ID, brightness, vivid mode, and polling interval retain their original storage keys. New Bluetooth endpoint data is local to the site/browser and contains no Spotify tokens. A new hostname or browser profile has separate storage. Logs are capped at 300 lines and do not intentionally log token values or OAuth URLs. Do not commit browser storage exports, tokens, `.env` files, or screenshots containing account details. The build only publishes the three browser files.
 
 ## References
 
