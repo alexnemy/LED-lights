@@ -8,8 +8,8 @@ Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. I
 
 ## Current review status
 
-- The original ZIP remains unchanged in Git history at `2e642fc`. The original Bluetooth update and simpler controls were merged through PRs #1 and #2.
-- `bluetooth-connection-audit` is the review branch for the connection audit and targeted safeguards. See [the investigation and source evidence](docs/BLUETOOTH-INVESTIGATION.md). Pushing it does not replace the production site.
+- The original ZIP remains unchanged in Git history at `2e642fc`. The original Bluetooth update, simpler controls, and connection audit were merged through PRs #1, #2, and #3.
+- `bluetooth-forget-recovery` is the review branch for an optional website device-permission reset. It does not reset ChromeOS pairing or its native Bluetooth cache. See [the investigation and source evidence](docs/BLUETOOTH-INVESTIGATION.md). Review and test this update before merging or publishing it.
 - The owner reported a successful 15-minute manual color test, followed by intermittent connection failures in other attempts. This is useful hardware evidence, not proof that the original stability problem is fully resolved. Automated tests use simulated devices and Spotify responses.
 - Follow [deployment instructions](docs/DEPLOYMENT.md) to publish to the same existing site, with its unchanged redirect URI.
 
@@ -40,6 +40,10 @@ The **Settings** button opens a keyboard-accessible dialog containing the Client
 
 In **Advanced Bluetooth & optional color tests**, you can choose a different controller, enter a custom service, change the writable characteristic, run red/green/blue tests, and optionally remember the visually verified endpoint. That checkbox is only for verified endpoint caching, not permission to use Spotify sync. Initializer selection and browser write completion are not physical verification. Selecting another characteristic still stops sync so you can decide what to send next.
 
+**Forget saved lights**, in the same section, stops syncing, disconnects, waits for pending Bluetooth work, and clears the selected controller's saved choice, verified endpoint, and last-command RGB history. It calls Chrome's `BluetoothDevice.forget()` when supported and checks whether the website permission was removed when enumeration is available. Spotify sign-in, Client ID, brightness, vivid mode, polling interval, custom service setting, and manual hex preference are kept. The next **Connect Bluetooth** click opens Chrome's chooser; forgetting itself never opens it. A same-origin tab currently controlling those lights blocks the reset until it disconnects.
+
+The optional **Forget this website’s device permission after all connection retries fail** setting is **off by default**. If enabled, it runs only after the existing four retries are exhausted at the native GATT-connect stage. It stops sync and waits for another Connect click; it does not retry indefinitely or automatically resume Spotify after permission removal. This is a recovery experiment, not a verified repair for the ChromeOS/controller failure. It cannot unpair the lights in ChromeOS, clear the OS's GATT cache, or force Chrome's chooser to show an already-connected icon. Browsers that cannot confirm removal say so and still clear the app's saved choice.
+
 The available polling intervals remain 2, 3, 5, 8, and 15 seconds. The browser avoids overlapping playback requests and honors Spotify's HTTP 429 cooldown. Background tabs and Spotify's reporting delay can slow updates. Account/app eligibility and Spotify's current developer access rules still apply.
 
 Brightness is **0–100% RGB scaling**, not the controller's separate hardware brightness register. A saved RGB value describes the last website command, not a readback of the physical strip: changes made later in Apollo Lighting are not detected. If no color is known for this controller, the slider applies the visible manual selection with an explicit message instead of silently doing nothing. It does not send an invented hardware-brightness command. Power uses the original Apollo-family bytes `CC2333` (on) and `CC2433` (off); these are **unverified on this particular controller**. A “bytes sent” message describes browser completion, not physical confirmation. If power does not work, do not infer that a different undocumented command is correct.
@@ -61,7 +65,7 @@ See [the full connection investigation](docs/BLUETOOTH-INVESTIGATION.md) for the
 
 ## Developing with Codex
 
-Open **alexnemy/LED-lights** in Codex. Use `bluetooth-connection-audit` while the connection audit is under review. Future changes can branch from the reviewed version. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
+Open **alexnemy/LED-lights** in Codex. New work branches from `main`; use `bluetooth-forget-recovery` to review this optional permission-reset update. Each cloud task is already isolated; use the existing checkout and do not create a worktree unless explicitly requested. Preserve the original design, Spotify redirect, and working features.
 
 The application has no runtime packages. Development and automated tests need **Node.js 24** (Node 22+ supports the test command); no `npm install` is needed.
 
@@ -71,7 +75,7 @@ npm test
 npm run build
 ```
 
-`npm test` runs dependency-free Node tests against the GATT helper and actual inline page script, with fake Bluetooth, storage, Spotify responses, and timers. They cover session isolation, retry limits, write serialization/cancellation, endpoint caching, resuming sync, RGB/brightness/power frames, PKCE parameters, refresh tokens, and rate-limit behavior. These are simulations, not hardware or authenticated Spotify integration tests. `--test-isolation=none` keeps the runner compatible with restricted cloud process sandboxes; each page fixture still uses its own VM context.
+`npm test` runs dependency-free Node tests against the GATT helper and actual inline page script, with fake Bluetooth, storage, Spotify responses, and timers. They cover session isolation, retry limits, write serialization/cancellation, endpoint caching, resuming sync, RGB/brightness/power frames, PKCE parameters, refresh tokens, and rate-limit behavior. Permission-reset tests also cover pending native work, stale chooser/preload results, preserved Spotify preferences, other-tab ownership, release failures, and the opt-in retry limit. These are simulations, not hardware or authenticated Spotify integration tests. `--test-isolation=none` keeps the runner compatible with restricted cloud process sandboxes; each page fixture still uses its own VM context.
 
 `npm run build` copies the three browser files into `dist/`. It does not bundle or rewrite the app. For a local layout-only check, serve `dist/` with any static HTTP server, for example `python3 -m http.server 8000 --directory dist`. The app intentionally requires HTTPS for Spotify sign-in; the local page is not an alternative redirect. HTTPS Netlify previews can test manual Bluetooth, but Spotify login on a different hostname will not match the production redirect registration. Do not change the registered redirect just to test a preview.
 

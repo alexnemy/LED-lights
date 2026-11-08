@@ -42,6 +42,16 @@ A brief connection notification in ChromeOS can therefore occur before the websi
 
 `AttemptSetDeviceInUnpairedDeviceList` emits the warning and skips a Settings list entry ([device cache lines 274–287](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/chromeos/ash/services/bluetooth_config/device_cache_impl.cc#274)). The filter intentionally hides many BLE devices except specified classes such as HID/security keys ([filter lines 417–448](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/device/bluetooth/chromeos/bluetooth_utils.cc#417)). This is not the Web Bluetooth unsupported-device error path.
 
+### Chrome's chooser and forgetting permission
+
+The owner clarified that the reported Pair/Connect wording and different symbols appear in **Chrome's popup after Connect Bluetooth**, not ChromeOS Settings. In the same M156 reference snapshot:
+
+- The chooser uses a Bluetooth-connected icon when `IsConnected(row)` is true; otherwise it uses one of five signal-strength indicators ([chooser view lines 185–209](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/chrome/browser/ui/views/device_chooser_content_view.cc#185)). That connected flag is populated from `is_gatt_connected`, independently of OS pairing ([controller lines 166–208](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/components/permissions/bluetooth_chooser_controller.cc#166)). Without an image of this particular popup, the reported triangle cannot be identified conclusively; it may be a signal-strength indicator.
+- The generic chooser's action label is the localized **Pair** string ([controller lines 45–47](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/components/permissions/bluetooth_chooser_controller.cc#45)). Wording alone does not establish that an OS bond is required or that website memory is corrupt. A successful already-connected state could reflect reuse of a native link; that remains an explanation to investigate, not a confirmed root cause.
+- `BluetoothDevice.forget()` invokes a website permission removal path. The browser removes this origin's allowed device or revokes its permission; it does **not** call OS unpairing or native cache reset ([ForgetDevice lines 925–950](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/content/browser/bluetooth/web_bluetooth_service_impl.cc#925)). The callback can complete without removal when Bluetooth permission is unavailable, so the application checks `getDevices()` afterward where supported.
+
+Forgetting can require more chooser prompts. It cannot force Chrome's already-connected icon or repair the discarded native connection error. A controlled website-permission reset is an experiment, not a proven remedy for stale OS state.
+
 ### Multiple tabs require careful interpretation
 
 Chromium can reuse an existing GATT link and join a pending connection attempt ([device lines 427–459](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/device/bluetooth/bluetooth_device.cc#427)). It reference-counts connections and disconnects the native link after the last connection reference is removed ([lines 665–670](https://chromium.googlesource.com/chromium/src/+/e578526bedf0f2933107eb18df7d35c03e9acf5b/device/bluetooth/bluetooth_device.cc#665)). Thus “another tab was open” alone is not a native failure diagnosis. Tabs can nevertheless send competing LED commands and independently retry, so coordinating Album Glow tabs is a valid application fix.
@@ -63,11 +73,19 @@ Web Locks coordinate **one origin**. A Netlify preview, production site, differe
 
 No UUIDs, color/power protocol bytes, write-response preference, or native MTU assumptions were changed. Brightness remains RGB scaling, and the original hardware power commands remain unverified on this physical controller.
 
+## Optional permission-reset update
+
+The subsequent `bluetooth-forget-recovery` change adds **Forget saved lights** in advanced Settings and an **off-by-default** automatic setting. The automatic path runs once only after all four retries are exhausted at GATT connect, then waits for another user click. Neither path opens a background chooser, unpairs ChromeOS devices, changes connection parameters, or claims that the native bug is repaired.
+
+Resetting cancels sync/chooser results, drains the existing operation lane and ownership acquisition, and reacquires the same-origin per-device reservation before revoking permission. A cooperating owner blocks the reset. Release failures retain the existing failure barrier. Late preload results cannot restore the forgotten object, and leaving the page cancels a pending reset before it revokes permission. Only the selected controller's app metadata is removed; Spotify and general preferences remain.
+
 ## Validation and practical limit
 
 The existing 76 tests passed before changes. All **105 automated tests** pass after the audit adds ownership, cancellation, lifecycle, and integration regressions. In particular, the five-attempt native failure test verifies **zero application discovery calls and zero LED writes**. Tests hold old native connect/write promises pending, confirm a second page is blocked, then resolve them late and verify safe handover. Permission errors and failed ownership releases do not bypass protection.
 
 Chromium browser tests use **real Web Locks across pages** with simulated Bluetooth: same-origin contention, no Bluetooth calls from the blocked page, release/handover, pagehide cleanup, preserving an already-ready controller, and the explicit different-origin limitation. The existing UI/Spotify/brightness/live-color/clipboard checks also pass with simulated services.
+
+The permission-reset update adds **21 regression tests**, for **126 passing Node tests** in total. They cover supported/unsupported/declined permission removal, preserving Spotify/preferences, cancelling pending chooser/preload work, draining native connects/writes, refusing another tab's ownership, retaining failed-release barriers (including a late ownership grant), and resetting only after the full opted-in GATT-connect retry budget. Chromium checks also exercise the actual reset controls, next-click chooser gesture, saved setting, native Web Locks refusal/handover, and mobile Settings layout with simulated Bluetooth.
 
 These tests validate application behavior. They do not reproduce this physical Chromebook/LED controller's radio, firmware, ChromeOS daemon, or real Spotify account. A native Bluetooth promise that never settles still cannot be safely replaced by an overlapping operation: the controller deliberately retains its serialized lane and ownership until native work settles, rather than using a misleading timeout race. The earlier supplied traces did settle with errors, so a hung promise does not explain those particular attempts.
 
