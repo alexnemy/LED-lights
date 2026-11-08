@@ -24,45 +24,84 @@
     .song{font-weight:750;font-size:17px}small{color:#a3aaba}pre{white-space:pre-wrap;word-break:break-word;background:#0d0f13;color:#cbd3e0;border-radius:10px;padding:15px;max-height:210px;overflow:auto;font-size:12px}
     .tiny{font-size:12px}#alert{color:#ffc579;white-space:pre-wrap}#startBtn{font-size:17px}
     @media(max-width:690px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.cover{width:80px;height:80px}.now{min-height:80px}}
+
+    .heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
+    .heading h1{margin:0}.heading button{margin:0;flex-shrink:0}
+    #startupBtn{font-size:18px;padding:13px 22px}#startupStatus{margin-bottom:0}
+    .preset-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:14px 0}
+    .preset{display:flex;align-items:center;justify-content:center;gap:7px;margin:0;padding:10px 6px;min-width:0}
+    .preset-dot{width:16px;height:16px;border-radius:50%;background:var(--preset);border:1px solid #ffffff55;flex-shrink:0}
+    .preset[aria-pressed="true"]{border-color:#a6c9ff;background:#354862}
+    .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.color-controls label{margin-top:0}
+    input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
+    .hex-control{flex:1;min-width:140px}
+    .log-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.log-heading h2,.log-heading button{margin:0}
+    #logCopyText{width:100%;min-height:130px;background:#111318;color:#ededf2;border:1px solid #525662;border-radius:9px;padding:10px;font:12px monospace}
+    details summary{cursor:pointer;color:#bac2d0}details[open] summary{margin-bottom:12px}
+    dialog{width:min(620px,calc(100% - 28px));max-height:85vh;overflow:auto;color:#ededf2;background:#1b1e26;border:1px solid #525662;border-radius:16px;padding:22px}
+    dialog::backdrop{background:#080b12cc}.dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .dialog-heading h2{font-size:22px;margin:0}.dialog-heading button{margin:0}
+    dialog h3{font-size:16px;margin:22px 0 8px}#alert{margin:12px 0}#settingsStatus{color:#a6c9ff}
+    @media(max-width:690px){.preset-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.heading h1{font-size:26px}.heading .chip{display:none}.heading button{padding:9px}}
   </style>
 </head>
 <body>
 <main>
-  <h1>✦ Album Glow <span class="chip">Fast sync</span></h1>
-  <p class="sub">Turn your Spotify album artwork into the color of your Apollo Lighting LEDs. Runs directly in Chrome on your Chromebook. No Linux, Python, or terminal required. Spotify login stays on Spotify; access tokens remain in this browser.</p>
+  <div class="heading">
+    <h1>✦ Album Glow <span class="chip">Your music, your light</span></h1>
+    <button id="settingsBtn" type="button" aria-haspopup="dialog">Settings</button>
+  </div>
+  <p class="sub">Sync your lights with Spotify, or choose a color of your own.</p>
+  <section class="panel">
+    <button id="startupBtn" class="primary" type="button">Start Album Glow</button>
+    <button id="stopBtn" type="button">Stop syncing</button>
+    <p class="tiny">Connect your lights and start Spotify sync with your saved settings. First-time sign-in or browser permission may still be needed.</p>
+    <div id="startupStatus" class="state" role="status">Ready when you are. You can also connect Bluetooth and use colors without Spotify.</div>
+    <div id="syncStatus" class="state" role="status">Not syncing</div>
+    <div id="alert" role="alert"></div>
+  </section>
   <div class="grid">
     <section class="panel">
-      <h2>1 · Spotify Premium</h2>
-      <p class="tiny">Publish this page on a free HTTPS site, then create a Spotify developer app. Set its redirect URI to the <strong>exact web address below</strong> (including slash). Use your Client ID only, not your Client Secret.</p>
-      <label>Spotify redirect URI — copy into your app settings</label><div style="display:flex;align-items:center;gap:8px"><input id="redirect" readonly aria-label="Spotify redirect URI"><button id="copyRedirectBtn" type="button">Copy</button></div><label for="clientId">Spotify Client ID</label>
-      <input id="clientId" placeholder="32-character Client ID" autocomplete="off" spellcheck="false">
-      <button id="spotifyBtn" class="green">Connect Spotify</button>
-      <button id="logoutSpotifyBtn">Disconnect Spotify</button>
-      <div class="state" id="spotifyStatus">Not connected</div>
+      <h2>Spotify</h2>
+      <button id="spotifyBtn" class="green" type="button">Connect Spotify</button>
+      <button id="logoutSpotifyBtn" type="button">Disconnect Spotify</button>
+      <div class="state" id="spotifyStatus" role="status">Not connected</div>
+      <p class="tiny">Your saved sign-in and Client ID are reused. Setup is in Settings.</p>
     </section>
     <section class="panel">
-      <h2>2 · Apollo Bluetooth</h2>
-      <p class="tiny">Close Apollo Lighting on your phone first. Your controller: <strong>AP-E1044600F933</strong>.</p>
-      <button id="btBtn" class="primary">Choose Apollo lights</button>
-      <button id="btDisconnectBtn">Disconnect lights</button>
-      <div class="state" id="btStatus">Not connected</div>
-      <label for="customService">Custom BLE service UUID (only if needed)</label>
-      <input id="customService" placeholder="e.g. ffe0 or a full UUID" spellcheck="false">
-      <label for="characteristic">Writable characteristic</label>
-      <select id="characteristic"><option value="">Connect Bluetooth first</option></select>
-      <button id="testBtn">Test red</button><button id="testGreen">Test green</button><button id="testBlue">Test blue</button>
-      <div style="margin-top:18px;padding-top:13px;border-top:1px solid #333745">
-        <h2 style="margin-bottom:6px">LED power &amp; brightness</h2>
-        <button id="ledPowerBtn" class="green" type="button" disabled>Turn LEDs off</button>
-        <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
-        <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
-        <p class="tiny">Brightness dims RGB color output. It does not change Apollo's separate hardware brightness setting.</p>
-        <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
+      <h2>Lights</h2>
+      <button id="btBtn" class="primary" type="button">Connect Bluetooth</button>
+      <button id="btDisconnectBtn" type="button">Disconnect lights</button>
+      <div class="state" id="btStatus" role="status">Not connected</div>
+      <button id="ledPowerBtn" class="green" type="button" disabled>Turn LEDs off</button>
+      <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
+      <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
+      <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
+      <p class="tiny">Brightness dims RGB output. Power commands still need confirmation on your controller.</p>
+    </section>
+    <section class="panel wide" aria-labelledby="manualHeading">
+      <h2 id="manualHeading">Pick your color</h2>
+      <p class="tiny">No Spotify needed. Choosing a color pauses Spotify sync. Presets, the picker, and valid hex entries update your lights as you edit.</p>
+      <div class="preset-grid" id="presets" aria-label="Preset colors">
+        <button class="preset" type="button" data-color="#FF0000" aria-pressed="false"><span class="preset-dot" style="--preset:#FF0000" aria-hidden="true"></span>Red</button>
+        <button class="preset" type="button" data-color="#FF7A00" aria-pressed="false"><span class="preset-dot" style="--preset:#FF7A00" aria-hidden="true"></span>Orange</button>
+        <button class="preset" type="button" data-color="#FFFF00" aria-pressed="false"><span class="preset-dot" style="--preset:#FFFF00" aria-hidden="true"></span>Yellow</button>
+        <button class="preset" type="button" data-color="#00FF00" aria-pressed="false"><span class="preset-dot" style="--preset:#00FF00" aria-hidden="true"></span>Green</button>
+        <button class="preset" type="button" data-color="#00FFFF" aria-pressed="false"><span class="preset-dot" style="--preset:#00FFFF" aria-hidden="true"></span>Cyan</button>
+        <button class="preset" type="button" data-color="#0000FF" aria-pressed="false"><span class="preset-dot" style="--preset:#0000FF" aria-hidden="true"></span>Blue</button>
+        <button class="preset" type="button" data-color="#8000FF" aria-pressed="false"><span class="preset-dot" style="--preset:#8000FF" aria-hidden="true"></span>Purple</button>
+        <button class="preset" type="button" data-color="#FF1493" aria-pressed="false"><span class="preset-dot" style="--preset:#FF1493" aria-hidden="true"></span>Pink</button>
+        <button class="preset" type="button" data-color="#FFFFFF" aria-pressed="false"><span class="preset-dot" style="--preset:#FFFFFF" aria-hidden="true"></span>White</button>
+        <button class="preset" type="button" data-color="#FFCC88" aria-pressed="false"><span class="preset-dot" style="--preset:#FFCC88" aria-hidden="true"></span>Warm white</button>
       </div>
-      <label style="margin-top:12px"><input id="confirmed" type="checkbox" style="width:auto;margin-right:8px">I saw the lights change to the test colors</label>
+      <div class="color-controls">
+        <div><label for="manualPicker">Color picker</label><input id="manualPicker" type="color" value="#ff0000"></div>
+        <div class="hex-control"><label for="manualHex">Hex color</label><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-describedby="manualStatus"></div>
+      </div>
+      <div class="state" id="manualStatus" role="status">Connect Bluetooth to apply a color. Your last manual color is remembered.</div>
     </section>
     <section class="panel wide">
-      <h2>3 · Sync the album artwork</h2>
+      <h2>From your album artwork</h2>
       <div class="now">
         <img id="cover" class="cover" alt="Currently playing album cover" hidden>
         <div>
@@ -73,28 +112,51 @@
           <div class="tiny"><a id="albumLink" href="https://open.spotify.com/" target="_blank" rel="noreferrer">Open Spotify ↗</a> · Artwork courtesy of Spotify</div>
         </div>
       </div>
-      <button id="startBtn" class="primary">Start automatic syncing</button>
-      <button id="stopBtn">Stop</button>
-      <button id="checkBtn">Check Spotify now</button>
-      <label for="pollInterval">How quickly to detect album changes</label>
-      <select id="pollInterval">
-        <option value="2000">Fastest — every 2 seconds</option>
-        <option value="3000">Fast — every 3 seconds</option>
-        <option value="5000">Balanced — every 5 seconds</option>
-        <option value="8000">Standard — every 8 seconds</option>
-        <option value="15000">Gentle — every 15 seconds</option>
-      </select>
-      <div class="state" id="syncStatus">Not syncing</div>
-      <label style="margin:11px 0"><input id="vividColors" type="checkbox" checked style="width:auto;margin-right:8px">Vivid LED colors (recommended: purer reds, richer colors)</label>
-      <p class="tiny">Default: every 2 seconds. Colors update when a different album is detected. This is not instant: Spotify playback status and browser timers can lag. If Spotify limits requests, the app automatically waits before trying again. Keep the tab visible and Chromebook awake for the quickest response.</p>
-      <div id="alert"></div>
+      <button id="startBtn" class="primary" type="button">Resume Spotify sync</button>
+      <button id="checkBtn" type="button">Check Spotify now</button>
     </section>
     <section class="panel wide">
-      <h2>Connection log</h2>
-      <pre id="log" aria-live="polite">Ready. Connect Bluetooth and test your controller first, then connect Spotify.</pre>
-      <p class="tiny">This controller protocol is unverified for AP-E1044600F933. Test colors manually before starting automatic syncing. If tests do nothing, the controller may require a different Bluetooth command or service.</p>
+      <div class="log-heading"><h2>Connection log</h2><button id="copyLogBtn" type="button">Copy log</button></div>
+      <details><summary>Show log</summary><pre id="log" aria-live="polite">Ready. Use Start Album Glow, or connect Bluetooth to pick a color.</pre></details>
+      <div id="logCopyStatus" class="state" role="status"></div>
+      <div id="logCopyFallback" hidden><label for="logCopyText">Log ready to copy</label><textarea id="logCopyText" readonly></textarea></div>
     </section>
   </div>
+  <dialog id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="dialog-heading"><h2 id="settingsTitle">Settings</h2><button id="closeSettingsBtn" type="button" aria-label="Close settings">Close</button></div>
+    <p class="tiny">Saved in this browser. You only need to set these up once on the same website.</p>
+    <h3>Spotify setup</h3>
+    <label for="clientId">Spotify Client ID</label>
+    <input id="clientId" placeholder="32-character Client ID" autocomplete="off" spellcheck="false">
+    <p class="tiny">Use the public Client ID from your Spotify Developer app, never its Client Secret.</p>
+    <label for="redirect">Spotify redirect URI</label>
+    <div style="display:flex;align-items:center;gap:8px"><input id="redirect" readonly><button id="copyRedirectBtn" type="button">Copy</button></div>
+    <button id="saveSettingsBtn" class="primary" type="button">Save settings</button>
+    <div class="state" id="settingsStatus" role="status"></div>
+    <h3>Album colors</h3>
+    <label for="pollInterval">How quickly to detect album changes</label>
+    <select id="pollInterval">
+      <option value="2000">Fastest — every 2 seconds</option>
+      <option value="3000">Fast — every 3 seconds</option>
+      <option value="5000">Balanced — every 5 seconds</option>
+      <option value="8000">Standard — every 8 seconds</option>
+      <option value="15000">Gentle — every 15 seconds</option>
+    </select>
+    <label><input id="vividColors" type="checkbox" checked style="width:auto;margin-right:8px">Vivid album colors</label>
+    <p class="tiny">Manual colors use the exact RGB you pick, scaled by brightness. Album sync updates on album changes; background tabs and Spotify rate limits can slow updates.</p>
+    <details>
+      <summary>Advanced Bluetooth &amp; optional color tests</summary>
+      <p class="tiny">Close Apollo Lighting on your phone and other Album Glow tabs before connecting.</p>
+      <button id="changeDeviceBtn" type="button">Choose different lights</button>
+      <label for="customService">Custom BLE service UUID (only if needed)</label>
+      <input id="customService" placeholder="e.g. ffe0 or a full UUID" spellcheck="false">
+      <label for="characteristic">Writable characteristic</label>
+      <select id="characteristic"><option value="">Connect Bluetooth first</option></select>
+      <button id="testBtn" type="button">Test red</button><button id="testGreen" type="button">Test green</button><button id="testBlue" type="button">Test blue</button>
+      <label><input id="confirmed" type="checkbox" style="width:auto;margin-right:8px">Remember the connection after these color tests (optional)</label>
+      <p class="tiny">Color testing is optional, not a startup requirement. Only check this after the physical colors match. Browser write completion alone is not proof. Brightness is RGB scaling; the original Apollo power commands remain unverified on this controller.</p>
+    </details>
+  </dialog>
 </main>
 <script src="bluetooth.js"></script>
 <script>
@@ -105,9 +167,14 @@ const COMMON_SERVICES=[0xffe0,0xfff0,0xffa0,0xffb0,0xffe5,0xffd0,0xff00,0xfff6,0
 const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, writable=[], syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
+let startupRequest=null, grantedDevices=[], spotifyLoginPending=false;
+const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
+let manualColor=previousManualColor||'#FF0000', manualRequested=false;
+let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManualInputAt=-Infinity;
+const MANUAL_INPUT_INTERVAL=200;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
-let ledIsOn=true, lastLedRgb=null, ledPowerBusy=false, brightnessTimer=null;
+let ledIsOn=true, lastLedRgb=null, lastLedDeviceId=null, ledPowerBusy=false, brightnessTimer=null, brightnessRequested=false;
 const POWER_FRAME=on=>new Uint8Array(on?[0xcc,0x23,0x33]:[0xcc,0x24,0x33]);
 function renderLedControls(){
  $('ledPowerBtn').disabled=ledPowerBusy||!device?.gatt?.connected||!char;
@@ -116,14 +183,31 @@ function renderLedControls(){
  $('ledBrightness').value=String(ledBrightness);
  $('ledBrightnessValue').textContent=ledBrightness+'%';
 }
+function rememberedLedColor(deviceId){
+ try{
+  const saved=JSON.parse(localStorage.getItem('albumglow_last_rgb_v1')||'null');
+  if(saved?.deviceId===deviceId && Array.isArray(saved.rgb) && saved.rgb.length===3 && saved.rgb.every(n=>Number.isInteger(n)&&n>=0&&n<=255))return saved.rgb.slice();
+ }catch{ /* Ignore malformed or unavailable local color history. */ }
+ // Migrate the last manual color saved by the previous version, only for the
+ // controller that was remembered when this page loaded.
+ if(deviceId===previousDeviceId && previousManualColor){
+  try{return rgbFromHex(normalizeHex(previousManualColor))}catch{ /* invalid old value */ }
+ }
+ return null;
+}
 async function sendLedRgb(r,g,b,{kind='color',valid=()=>true}={}){
- lastLedRgb=[r,g,b];
+ const rgb=[r,g,b],deviceId=device?.id;
+ lastLedRgb=rgb;lastLedDeviceId=deviceId||null;
  if(!ledIsOn||ledPowerBusy)return; // Keep the latest desired RGB without relighting the strip.
- const gain=ledBrightness/100;
- const power=powerGeneration;
- const scaled=lastLedRgb.map(n=>Math.max(0,Math.min(255,Math.round(n*gain))));
- await sendFrame(COLOR_FRAME(...scaled),
-  {kind,valid:()=>power===powerGeneration && ledIsOn && valid()});
+ const gain=ledBrightness/100,power=powerGeneration;
+ const scaled=rgb.map(n=>Math.max(0,Math.min(255,Math.round(n*gain))));
+ await sendFrame(COLOR_FRAME(...scaled),{kind,valid:()=>power===powerGeneration && ledIsOn && valid()});
+ // Remember unscaled RGB, including Spotify colors. This is the last browser-
+ // accepted command, not a readback of the controller or its hardware brightness.
+ if(deviceId){
+  try{localStorage.setItem('albumglow_last_rgb_v1',JSON.stringify({deviceId,rgb}))}
+  catch{log('Could not save the last LED color in this browser')}
+ }
 }
 async function setLedPower(on){
  if(ledPowerBusy)return;
@@ -135,39 +219,203 @@ async function setLedPower(on){
   $('ledControlsStatus').textContent=on?'Power ON bytes sent (unverified on this controller)':'Power OFF bytes sent (unverified on this controller)';
   log('LED power '+(on?'ON':'OFF')+' command sent');
   ledPowerBusy=false;
-  if(on && lastLedRgb)await sendLedRgb(...lastLedRgb);
+  if(on && lastLedRgb){
+   await sendLedRgb(...lastLedRgb);
+   if(manualRequested)$('manualStatus').textContent=manualColor+' sent · brightness '+ledBrightness+'%';
+  }
  }catch(e){err(e)}finally{ledPowerBusy=false;renderLedControls()}
 }
 function setLedBrightness(value){
+ brightnessRequested=true;
  const n=Number(value);ledBrightness=Number.isFinite(n)?Math.max(0,Math.min(100,Math.round(n))):100;
  localStorage.setItem('albumglow_brightness',String(ledBrightness));
  renderLedControls();
  $('ledControlsStatus').textContent='Brightness '+ledBrightness+'% (RGB dimming)';
- if(brightnessTimer!==null)clearTimeout(brightnessTimer);
- if(!ledIsOn||!lastLedRgb||!device?.gatt?.connected||!char)return;
+ if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
+ if(!device?.gatt?.connected||!char){$('ledControlsStatus').textContent='Brightness saved — connect Bluetooth to apply it.';return}
+ if(!lastLedRgb){
+  lastLedRgb=rememberedLedColor(device.id);lastLedDeviceId=device.id;
+  if(!lastLedRgb){
+   // There is no verified command for reading an unknown controller color.
+   // Use the visible manual selection and make that fallback explicit.
+   lastLedRgb=rgbFromHex(manualColor);
+   $('ledControlsStatus').textContent='Brightness will apply selected '+manualColor+'; no previous color is saved for these lights.';
+   log('Brightness is using selected '+manualColor+' because the controller color cannot be read.');
+  }
+ }
+ if(!ledIsOn||ledPowerBusy)return;
+ const run=syncGeneration;
  brightnessTimer=setTimeout(async()=>{
   brightnessTimer=null;
-  try{await sendLedRgb(...lastLedRgb)}catch(e){err(e)}
- },250); // Avoid flooding a temperamental Bluetooth connection while dragging.
+  if(run!==syncGeneration||!device?.gatt?.connected||!char)return;
+  try{
+   const rgb=manualRequested?rgbFromHex(manualColor):lastLedRgb;
+   await sendLedRgb(...rgb,{valid:()=>run===syncGeneration});
+   if(manualRequested)$('manualStatus').textContent=manualColor+' sent · brightness '+ledBrightness+'%';
+  }catch(e){err(e)}
+ },250); // Avoid flooding Bluetooth while dragging; always use unscaled RGB.
 }
 const store=key=>JSON.parse(localStorage.getItem(key)||'null');
 function log(s){const e=$('log');e.textContent=(e.textContent+'\n'+new Date().toLocaleTimeString()+': '+s).split('\n').slice(-300).join('\n');e.scrollTop=e.scrollHeight}
 function status(kind,s){$(kind+'Status').textContent=s;log(kind.toUpperCase()+': '+s)}
 function err(e){if(e?.name==='AbortError')return;let m=String(e?.message||e);$('alert').textContent=m;log('ERROR: '+m)}
+async function copyConnectionLog(){
+ if($('copyLogBtn').disabled)return;
+ const text=$('log').textContent;
+ $('copyLogBtn').disabled=true;$('logCopyFallback').hidden=true;
+ try{
+  await navigator.clipboard.writeText(text);
+  $('logCopyStatus').textContent='Log copied. Paste it into this chat.';
+ }catch{
+  // Clipboard permission can be unavailable. Keep the complete snapshot visible
+  // and selected so a normal Ctrl+C / long-press Copy still works.
+  $('logCopyFallback').hidden=false;
+  $('logCopyText').value=text;$('logCopyText').focus();$('logCopyText').select();
+  let copied=false;try{copied=Boolean(document.execCommand?.('copy'))}catch{ /* manual copy below */ }
+  if(copied){
+   $('logCopyFallback').hidden=true;$('copyLogBtn').focus();
+   $('logCopyStatus').textContent='Log copied. Paste it into this chat.';
+  }else $('logCopyStatus').textContent='Automatic copy was blocked. The log is selected below — press Ctrl+C, or long-press and choose Copy.';
+ }finally{$('copyLogBtn').disabled=false}
+}
+function openSettings(message=''){
+ $('settingsStatus').textContent=message;
+ if(!$('settingsDialog').open)$('settingsDialog').showModal();
+ if(message)$('clientId').focus();
+}
+function saveSettings(){
+ try{
+  const id=$('clientId').value.trim();
+  if(id)localStorage.setItem('albumglow_client',getClient());
+  else localStorage.removeItem('albumglow_client');
+  localStorage.setItem('albumglow_custom_service',$('customService').value.trim());
+  $('settingsStatus').textContent='Saved in this browser. You can close Settings.';
+ }catch(e){$('settingsStatus').textContent=e.message;$('clientId').focus()}
+}
+function renderStartup(){
+ $('startupBtn').disabled=Boolean(startupRequest)||spotifyLoginPending||$('btBtn').disabled;
+ $('startupBtn').textContent=spotifyLoginPending?'Signing in…':startupRequest?'Starting…':'Start Album Glow';
+ $('spotifyBtn').disabled=spotifyLoginPending;
+}
+function cancelStartup(message='Startup cancelled. Your lights can be used manually.'){
+ if(!startupRequest)return;
+ startupRequest=null;
+ $('startupStatus').textContent=message;
+ renderStartup();
+}
+function completeStartup(){
+ if(!startupRequest || startupRequest.deviceId!==device?.id || !char)return;
+ startupRequest=null;renderStartup();startSync();
+}
+async function startAlbumGlow(){
+ if(startupRequest || spotifyLoginPending || $('btBtn').disabled)return;
+ $('alert').textContent='';
+ if(!spotifyToken){
+  try{getClient()}catch{openSettings('Enter your Spotify Client ID once, then save. Your existing saved ID is reused automatically.');return}
+  // Sign in before connecting Bluetooth: OAuth navigation replaces this page.
+  sessionStorage.setItem('ag_start_after_login','1');
+  $('startupStatus').textContent='Opening Spotify sign-in. After returning, click Start Album Glow to connect your lights.';
+  if(!await spotifyConnect())sessionStorage.removeItem('ag_start_after_login');
+  return;
+ }
+ const request={deviceId:null};startupRequest=request;renderStartup();
+ $('startupStatus').textContent='Connecting your lights…';
+ if(device?.gatt?.connected && char){request.deviceId=device.id;completeStartup();return}
+ await pickBluetooth({startup:request});
+ if(startupRequest===request && !bluetooth.session)cancelStartup('No lights selected. Click Start Album Glow when you are ready.');
+}
+function normalizeHex(value){
+ let h=String(value).trim().replace(/^#/,'');
+ if(/^[a-f\d]{3}$/i.test(h))h=h.split('').map(c=>c+c).join('');
+ if(!/^[a-f\d]{6}$/i.test(h))throw Error('Enter a hex color such as #FF8800 (3 or 6 hex digits).');
+ return '#'+h.toUpperCase();
+}
+function rgbFromHex(value){return [1,3,5].map(i=>parseInt(value.slice(i,i+2),16))}
+function showManualColor(value,{preserveHex=false}={}){
+ if(!preserveHex)$('manualHex').value=value;
+ $('manualPicker').value=value.toLowerCase();
+ $('manualHex').setAttribute('aria-invalid','false');
+ for(const button of document.querySelectorAll('[data-color]'))button.setAttribute('aria-pressed',String(button.dataset.color===value));
+}
+function cancelLiveColorInput(){
+ if(manualInputTimer!==null)clearTimeout(manualInputTimer);
+ manualInputTimer=null;pendingManualInput=null;manualColorVersion++;
+}
+function setManualIntent(selected,options){
+ stopSync({cancelColorInput:false});manualColor=selected;manualRequested=true;
+ showManualColor(selected,options);localStorage.setItem('albumglow_manual_color',selected);
+ $('alert').textContent='';
+ $('startupStatus').textContent='Manual color mode. Use Start Album Glow to sync with Spotify again.';
+}
+function manualColorError(e){
+ if(e.name==='AbortError')return;
+ $('manualStatus').textContent=e.message;err(e);
+}
+async function sendManualColor(selected,version){
+ try{
+  const rgb=rgbFromHex(selected);
+  if(!device?.gatt?.connected||!char){
+   lastLedRgb=rgb;lastLedDeviceId=device?.id||null;
+   $('manualStatus').textContent=selected+' saved — connect Bluetooth to apply it.';return;
+  }
+  const run=syncGeneration;
+  await sendLedRgb(...rgb,{valid:()=>!syncing&&run===syncGeneration&&version===manualColorVersion});
+  if(run!==syncGeneration||version!==manualColorVersion)return;
+  $('manualStatus').textContent=ledPowerBusy?selected+' selected — waiting for power control.':
+   !ledIsOn?selected+' saved for when LEDs are turned on.':selected+' sent · brightness '+ledBrightness+'%';
+ }catch(e){manualColorError(e)}
+}
+async function applyManualColor(value){
+ try{
+  const selected=normalizeHex(value); // Invalid input does not stop Spotify.
+  cancelLiveColorInput();setManualIntent(selected);
+  await sendManualColor(selected,manualColorVersion);
+ }catch(e){$('manualHex').setAttribute('aria-invalid','true');manualColorError(e)}
+}
+function queueManualColor(value,{preserveHex=false,finish=false}={}){
+ let selected;
+ try{selected=normalizeHex(value)}catch{
+  cancelLiveColorInput();$('manualHex').setAttribute('aria-invalid','true');
+  $('manualStatus').textContent='Enter 3 or 6 hex digits; the lights keep their last color while you type.';
+  return;
+ }
+ // change/blur follows input: format the completed field without sending twice.
+ if(finish&&manualRequested&&selected===manualColor){showManualColor(selected);return}
+ setManualIntent(selected,{preserveHex});
+ const version=++manualColorVersion;pendingManualInput={selected,version};
+ $('manualStatus').textContent=selected+' selected — updating lights…';
+ if(manualInputTimer===null){
+  const wait=Math.max(0,MANUAL_INPUT_INTERVAL-(Date.now()-lastManualInputAt));
+  manualInputTimer=setTimeout(flushManualColorInput,wait);
+ }
+}
+async function flushManualColorInput(){
+ if(manualInputTimer!==null)clearTimeout(manualInputTimer);
+ manualInputTimer=null;
+ const pending=pendingManualInput;pendingManualInput=null;
+ if(!pending||pending.version!==manualColorVersion)return;
+ lastManualInputAt=Date.now();
+ await sendManualColor(pending.selected,pending.version);
+}
 function bytes(str){return new TextEncoder().encode(str)}
 function base64url(binary){return btoa(String.fromCharCode(...binary)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/g,'')}
 async function challenge(verifier){return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes(verifier))))}
 function getClient(){const v=$('clientId').value.trim();if(!/^[a-f0-9]{32}$/i.test(v))throw Error('Enter the 32-character Spotify Client ID from your Spotify developer dashboard.');return v}
 async function spotifyConnect(){
+ if(spotifyLoginPending)return false;
+ let navigating=false;
  try{
   if(location.protocol !== 'https:')throw Error('Spotify login requires an HTTPS-hosted address. Open your existing HTTPS Album Glow website and retry.');
-  const id=getClient();localStorage.setItem('albumglow_client',id);
+  let id;try{id=getClient()}catch{openSettings('Enter and save your Spotify Client ID once, then use Connect Spotify.');return false}
+  localStorage.setItem('albumglow_client',id);
+  spotifyLoginPending=true;renderStartup();
   const verifier=base64url(crypto.getRandomValues(new Uint8Array(64)));
   const state=base64url(crypto.getRandomValues(new Uint8Array(16)));
   sessionStorage.setItem('ag_verifier',verifier);sessionStorage.setItem('ag_state',state);
   const params=new URLSearchParams({client_id:id,response_type:'code',redirect_uri:REDIRECT,code_challenge_method:'S256',code_challenge:await challenge(verifier),state,scope:'user-read-currently-playing'});
-  location.assign('https://accounts.spotify.com/authorize?'+params);
- }catch(e){err(e)}
+  location.assign('https://accounts.spotify.com/authorize?'+params);navigating=true;return true;
+ }catch(e){err(e);return false}
+ finally{if(!navigating)spotifyLoginPending=false;renderStartup()}
 }
 async function tokenPost(data){
  const response=await fetch('https://accounts.spotify.com/api/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});
@@ -185,6 +433,7 @@ async function finishSpotifyRedirect(){
   const client_id=getClient();
   const data=await tokenPost({client_id,grant_type:'authorization_code',code,redirect_uri:REDIRECT,code_verifier:verifier});
   sessionStorage.removeItem('ag_verifier');sessionStorage.removeItem('ag_state');setTokens(data);
+  if(sessionStorage.getItem('ag_start_after_login')){sessionStorage.removeItem('ag_start_after_login');$('startupStatus').textContent='Spotify is connected. Click Start Album Glow to connect your lights and start syncing.';}
  }catch(e){err(e)}
 }
 async function spotifyAccess(){
@@ -198,17 +447,24 @@ function spotifyLogout(){spotifyToken=null;localStorage.removeItem('albumglow_to
 const bluetooth=new AlbumGlowBluetooth({
  storage:localStorage,
  log,
- onState:message=>status('bt',message),
+ onState:message=>{
+  status('bt',message);
+  if(startupRequest){
+   $('startupStatus').textContent=message;
+   if(message.startsWith('Automatic retries stopped')){startupRequest=null;renderStartup()}
+  }
+ },
  onClear:()=>{
-  char=null;writable=[];currentAlbum='';syncGeneration++;
+  char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
   if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
   $('characteristic').replaceChildren();
   enableColorTests(false);
   if(syncing)$('syncStatus').textContent='Sync paused — waiting for Bluetooth';
  },
- onUnconfirmed:()=>{$('confirmed').checked=false;stopSync()},
+ onUnconfirmed:()=>{$('confirmed').checked=false;stopSync({cancelPendingStartup:false})},
  onReady:({device:connected,entries,index})=>{
   device=connected;writable=entries;char=entries[index].c;
+  if(lastLedDeviceId!==connected.id||!lastLedRgb){lastLedRgb=rememberedLedColor(connected.id);lastLedDeviceId=connected.id;}
   syncGeneration++;currentAlbum='';
   const sel=$('characteristic');sel.replaceChildren();
   entries.forEach(({c,service},i)=>{
@@ -217,33 +473,66 @@ const bluetooth=new AlbumGlowBluetooth({
   });
   sel.value=String(index);enableColorTests(true);
   $('alert').textContent='';
-  if(syncing && $('confirmed').checked)scheduleNextPoll(0);
+  if(startupRequest){completeStartup()}
+  else if(syncing)scheduleNextPoll(0);
+  else if(manualRequested){
+   const rgb=[1,3,5].map(i=>parseInt(manualColor.slice(i,i+2),16)),run=syncGeneration;
+   sendLedRgb(...rgb,{valid:()=>!syncing && run===syncGeneration}).then(()=>{
+    if(run===syncGeneration)$('manualStatus').textContent=ledIsOn?manualColor+' sent · brightness '+ledBrightness+'%':manualColor+' saved for when LEDs are turned on.';
+   }).catch(err);
+  }
+  else if(brightnessRequested)setLedBrightness(ledBrightness);
  }
 });
-async function pickBluetooth(){
- if($('btBtn').disabled)return;
+function requireBluetoothAccess(){
+ if(!navigator.bluetooth)throw Error('Web Bluetooth is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
+ const policy=document.permissionsPolicy||document.featurePolicy;
+ // Older engines also return false for policy names they do not recognize.
+ const recognized=!policy?.features || policy.features().includes('bluetooth');
+ if(recognized && policy?.allowsFeature?.('bluetooth')===false){
+  throw Error('Chrome is blocking Bluetooth for this page. Open the Album Glow preview or website directly in its own Chrome tab, then try Connect Bluetooth again. Embedded previews may not allow Bluetooth.');
+ }
+}
+async function pickBluetooth({startup=null,forceChooser=false}={}){
+ if($('btBtn').disabled)return false;
+ if(!startup)cancelStartup();
+ if(device?.gatt?.connected && char && !forceChooser)return true;
  const selection=++selectionGeneration;
- $('btBtn').disabled=true;
+ $('btBtn').disabled=true;renderStartup();
  try{
   $('alert').textContent='';
-  if(!navigator.bluetooth)throw Error('Web Bluetooth is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
+  requireBluetoothAccess();
   let services=[...COMMON_SERVICES];
   const cached=bluetooth.cachedEndpoint();if(cached)services.push(cached.service);
   const custom=$('customService').value.trim();
   if(custom)services.push(/^(?:0x)?[a-f\d]{4}$/i.test(custom)?parseInt(custom.replace(/^0x/i,''),16):custom);
-  log('BT: device selection requested (Chrome chooser)');
-  // requestDevice is called directly from this user click, before any await.
-  // Permission for optional services does not itself perform service discovery.
-  const picked=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'AP-'}],optionalServices:[...new Set(services)]});
-  if(selection!==selectionGeneration){log('BT: ignored device selection after Disconnect');return}
+  const savedId=localStorage.getItem('albumglow_device')||cached?.deviceId;
+  const remembered=!forceChooser && grantedDevices.find(d=>d.id===savedId);
+  log(remembered?'BT: reconnecting previously approved lights':'BT: device selection requested (Chrome chooser)');
+  // Granted devices are loaded before this click. If unavailable, call the
+  // chooser immediately from this gesture, without awaiting getDevices first.
+  const picking=remembered?Promise.resolve(remembered):navigator.bluetooth.requestDevice({filters:[{namePrefix:'AP-'}],optionalServices:[...new Set(services)]});
+  const picked=await picking;
+  if(selection!==selectionGeneration){log('BT: ignored device selection after Disconnect');return false}
   log('BT: device selection complete: '+picked.name);
-  stopSync();$('confirmed').checked=false;
+  stopSync({cancelPendingStartup:false});$('confirmed').checked=false;
   device=picked;
+  localStorage.setItem('albumglow_device',picked.id);
+  grantedDevices=[picked,...grantedDevices.filter(d=>d.id!==picked.id)];
+  if(startup)startup.deviceId=picked.id;
   await bluetooth.useDevice(picked);
+  return Boolean(char && picked.gatt.connected);
  }catch(e){
   if(e.name==='NotFoundError')log('BT: device selection cancelled or no matching controller selected');
   else err(Error('Bluetooth selection/setup — '+e.name+': '+e.message));
- }finally{$('btBtn').disabled=false;renderLedControls()}
+  if(startupRequest===startup)cancelStartup('Startup stopped. Check the connection log, then try again.');
+  return false;
+ }finally{$('btBtn').disabled=false;renderLedControls();renderStartup()}
+}
+async function loadGrantedDevices(){
+ if(!navigator.bluetooth?.getDevices)return;
+ try{grantedDevices=await navigator.bluetooth.getDevices()}
+ catch{log('BT: saved device access unavailable; the next Connect click will use the chooser')}
 }
 function enableColorTests(enabled){
  for(const id of ['testBtn','testGreen','testBlue'])$(id).disabled=!enabled;
@@ -254,6 +543,7 @@ async function testColor(r,g,b){
  try{
   if(!ledIsOn)throw Error('Turn LEDs on before running a color test.');
   if(ledPowerBusy)throw Error('Wait for the power command to finish before testing colors.');
+  stopSync();manualRequested=false;
   await sendLedRgb(r,g,b,{kind:'test'});
   log('Test command sent. Confirm VISUALLY that LEDs changed, then enable the safety checkbox if so.');
  }catch(e){err(e)}
@@ -383,7 +673,9 @@ async function checkSpotify(){
  try{
   const run=syncGeneration;
   const access=await spotifyAccess();
+  if(run!==syncGeneration)return;
   const response=await fetch('https://api.spotify.com/v1/me/player/currently-playing',{headers:{Authorization:'Bearer '+access},cache:'no-store'});
+  if(run!==syncGeneration)return;
   if(response.status===429){
    rateLimitCount++;
    const indicated=Number(response.headers.get('Retry-After'));
@@ -401,6 +693,7 @@ async function checkSpotify(){
   if(response.status===403)throw Error('Spotify returned 403. Confirm your Premium account has access to this developer app.');
   if(!response.ok)throw Error('Spotify playback API returned HTTP '+response.status);
   const data=await response.json();
+  if(run!==syncGeneration)return;
   if(rateLimitCount){rateLimitCount=0;rateLimitUntil=0;log('Spotify rate limit cleared')}
   if(!data?.item){
    $('syncStatus').textContent='Syncing · no active track · checking every '+(getPollInterval()/1000)+'s';
@@ -415,11 +708,12 @@ async function checkSpotify(){
  }catch(e){if(e.name!=='AbortError')log('SPOTIFY: check failed');err(e)}finally{polling=false}
 }
 function startSync(){
- if(!$('confirmed').checked){err(Error('First test a manual color and check that your LEDs actually changed.'));return}
- if(!spotifyToken){err(Error('Connect Spotify first.'));return}
- if(!device?.gatt?.connected){err(Error('Connect Apollo lights and run a red/green/blue test first.'));return}
+ if(!spotifyToken){err(Error('Connect Spotify first, or use a manual color.'));return}
+ if(!device?.gatt?.connected){err(Error('Connect Bluetooth first, or use Start Album Glow to connect and sync.'));return}
  if(!writable.length){err(Error('No writable LED characteristic was found.'));return}
  if(syncing)return;
+ cancelStartup();cancelLiveColorInput();manualRequested=false;
+ $('startupStatus').textContent='Album Glow is syncing with Spotify.';
  currentAlbum=''; // Resend current album color on every fresh start.
  syncing=true;syncGeneration++;
  $('alert').textContent='';
@@ -427,7 +721,9 @@ function startSync(){
  log('Automatic sync started; Spotify check every '+(getPollInterval()/1000)+' seconds.');
  scheduleNextPoll(0);
 }
-function stopSync(){
+function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
+ if(cancelColorInput)cancelLiveColorInput();
+ if(cancelPendingStartup)cancelStartup();
  const wasSyncing=syncing;
  syncing=false;syncGeneration++;
  if(syncTimer!==null){clearTimeout(syncTimer);syncTimer=null}
@@ -437,13 +733,15 @@ function stopSync(){
 $('spotifyBtn').onclick=spotifyConnect;
 $('logoutSpotifyBtn').onclick=spotifyLogout;
 enableColorTests(false);
-$('btBtn').onclick=pickBluetooth;
+$('btBtn').onclick=()=>pickBluetooth();
+$('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickBluetooth({forceChooser:true}) };
+$('startupBtn').onclick=startAlbumGlow;
 $('btDisconnectBtn').onclick=btDisconnect;
 $('characteristic').onchange=()=>{
- try{char=bluetooth.select(Number($('characteristic').value));renderLedControls()}catch(e){err(e)}
+ try{cancelStartup();char=bluetooth.select(Number($('characteristic').value));renderLedControls()}catch(e){err(e)}
 };
 $('confirmed').onchange=()=>{
- if(!$('confirmed').checked){stopSync();return}
+ if(!$('confirmed').checked)return;
  try{bluetooth.confirm()}catch(e){$('confirmed').checked=false;err(e)}
 };
 $('testBtn').onclick=()=>testColor(255,0,0);
@@ -476,13 +774,27 @@ $('vividColors').onchange=async()=>{
  if(syncing && device?.gatt?.connected){const run=syncGeneration;try{await sendLedRgb(...ledColor,{valid:()=>syncing && run===syncGeneration})}catch(e){err(e)}}
 };
 $('startBtn').onclick=startSync;
-$('stopBtn').onclick=stopSync;
+$('stopBtn').onclick=()=>{stopSync();$('startupStatus').textContent='Sync stopped. Pick a manual color or start Album Glow again.'};
 $('redirect').value=REDIRECT;
 if(location.protocol!=='https:'){$('alert').textContent='This local preview cannot sign in to Spotify. Use the existing HTTPS Album Glow website for Spotify sign-in.';}
 $('copyRedirectBtn').onclick=async()=>{try{await navigator.clipboard.writeText(REDIRECT);log('Copied redirect URI')}catch(e){$('redirect').select();document.execCommand('copy');log('Copied redirect URI')}};
 $('clientId').value=localStorage.getItem('albumglow_client')||'';
 spotifyToken=store('albumglow_tokens');
 if(spotifyToken)status('spotify','Saved Spotify session found');
+$('settingsBtn').onclick=()=>openSettings();
+$('closeSettingsBtn').onclick=()=>$('settingsDialog').close();
+$('saveSettingsBtn').onclick=saveSettings;
+$('customService').value=localStorage.getItem('albumglow_custom_service')||'';
+$('manualPicker').oninput=e=>queueManualColor(e.target.value);
+$('manualPicker').onchange=e=>queueManualColor(e.target.value,{finish:true});
+$('manualHex').oninput=e=>queueManualColor(e.target.value,{preserveHex:true});
+$('manualHex').onchange=e=>queueManualColor(e.target.value,{finish:true});
+$('manualHex').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();queueManualColor(e.target.value,{finish:true})}};
+$('copyLogBtn').onclick=copyConnectionLog;
+for(const button of document.querySelectorAll('[data-color]'))button.onclick=()=>applyManualColor(button.dataset.color);
+try{manualColor=normalizeHex(manualColor)}catch{manualColor='#FF0000'}
+showManualColor(manualColor);renderStartup();
+loadGrantedDevices();
 finishSpotifyRedirect();
 </script>
 </body>
