@@ -2,7 +2,7 @@
   "name": "album-glow",
   "version": "1.0.0",
   "private": true,
-  "description": "Static Spotify artwork to Apollo Bluetooth LED colors",
+  "description": "Static Spotify artwork to Apollo/SP630E Bluetooth or WLED USB LED colors",
   "scripts": {
     "test": "node --test --test-isolation=none tests/*.test.cjs",
     "build": "node scripts/build.cjs"

@@ -70,6 +70,7 @@
     </section>
     <section class="panel">
       <h2>Lights</h2>
+      <div id="controllerSummary" class="tiny">Apollo · Bluetooth</div>
       <button id="btBtn" class="primary" type="button">Connect Bluetooth</button>
       <button id="btDisconnectBtn" type="button">Disconnect lights</button>
       <div class="state" id="btStatus" role="status">Not connected</div>
@@ -77,7 +78,7 @@
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
-      <p class="tiny">Brightness dims RGB output. Power commands still need confirmation on your controller.</p>
+      <p id="powerNote" class="tiny">Brightness dims RGB output. Power commands still need confirmation on your controller.</p>
     </section>
     <section class="panel wide" aria-labelledby="manualHeading">
       <h2 id="manualHeading">Pick your color</h2>
@@ -125,6 +126,15 @@
   <dialog id="settingsDialog" aria-labelledby="settingsTitle">
     <div class="dialog-heading"><h2 id="settingsTitle">Settings</h2><button id="closeSettingsBtn" type="button" aria-label="Close settings">Close</button></div>
     <p class="tiny">Saved in this browser. You only need to set these up once on the same website.</p>
+    <h3>LED controller</h3>
+    <label for="controllerProfile">Controller and connection</label>
+    <select id="controllerProfile">
+      <option value="apollo">Apollo · Bluetooth (original controller)</option>
+      <option value="sp630e">SP630E · Bluetooth (test first)</option>
+      <option value="sp803e">SP803E · USB / WLED (fallback)</option>
+    </select>
+    <p class="tiny">Switching stops sync and disconnects the previous controller. Choose SP630E for the Bluetooth test, or SP803E for the USB test.</p>
+    <p id="controllerHelp" class="tiny"></p>
     <h3>Spotify setup</h3>
     <label for="clientId">Spotify Client ID</label>
     <input id="clientId" placeholder="32-character Client ID" autocomplete="off" spellcheck="false">
@@ -145,8 +155,8 @@
     <label><input id="vividColors" type="checkbox" checked style="width:auto;margin-right:8px">Vivid album colors</label>
     <p class="tiny">Manual colors use the exact RGB you pick, scaled by brightness. Album sync updates on album changes; background tabs and Spotify rate limits can slow updates.</p>
     <details>
-      <summary>Advanced Bluetooth &amp; optional color tests</summary>
-      <p class="tiny">Close Apollo Lighting on your phone and other Album Glow tabs before connecting.</p>
+      <summary>Advanced connection &amp; optional color tests</summary>
+      <p class="tiny">Close controller apps on your phone and other Album Glow tabs before connecting.</p>
       <button id="changeDeviceBtn" type="button">Choose different lights</button>
       <label for="customService">Custom BLE service UUID (only if needed)</label>
       <input id="customService" placeholder="e.g. ffe0 or a full UUID" spellcheck="false">
@@ -160,15 +170,25 @@
 </main>
 <script src="bluetooth-ownership.js"></script>
 <script src="bluetooth.js"></script>
+<script src="controller-protocols.js"></script>
+<script src="serial.js"></script>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const REDIRECT = location.origin + location.pathname;
 const COMMON_SERVICES=[0xffe0,0xfff0,0xffa0,0xffb0,0xffe5,0xffd0,0xff00,0xfff6,0xfff5,0xff60,0xffc0,0xffe6,0xffd5,0xfe00,0x180a];
-const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
+let controllerModel=localStorage.getItem('albumglow_controller')||'apollo';
+if(!Object.hasOwn(AlbumGlowControllers.profiles,controllerModel))controllerModel='apollo';
+const profile=()=>AlbumGlowControllers.get(controllerModel);
+const isUSB=()=>profile().transport==='serial';
+const lightSession=()=>isUSB()?usb.session:bluetooth.session;
+const lightDeviceId=()=>isUSB()?usb.session?.id:device?.id;
+const lightsReady=()=>isUSB()?Boolean(usb.session?.ready):Boolean(device?.gatt?.connected&&char);
+const connectionName=()=>isUSB()?'USB':'Bluetooth';
 let device=null, char=null, writable=[], syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, grantedDevices=[], spotifyLoginPending=false;
+let pendingSelections=0,grantedPorts=[],usbGrantVersion=0;
 const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
 let manualColor=previousManualColor||'#FF0000', manualRequested=false;
 let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManualInputAt=-Infinity;
@@ -176,9 +196,8 @@ const MANUAL_INPUT_INTERVAL=200;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
 let ledIsOn=true, lastLedRgb=null, lastLedDeviceId=null, ledPowerBusy=false, brightnessTimer=null, brightnessRequested=false;
-const POWER_FRAME=on=>new Uint8Array(on?[0xcc,0x23,0x33]:[0xcc,0x24,0x33]);
 function renderLedControls(){
- $('ledPowerBtn').disabled=ledPowerBusy||!device?.gatt?.connected||!char;
+ $('ledPowerBtn').disabled=ledPowerBusy||!lightsReady();
  $('ledPowerBtn').textContent=ledIsOn?'Turn LEDs off':'Turn LEDs on';
  $('ledPowerBtn').classList.toggle('green',ledIsOn);
  $('ledBrightness').value=String(ledBrightness);
@@ -187,44 +206,45 @@ function renderLedControls(){
 function rememberedLedColor(deviceId){
  try{
   const saved=JSON.parse(localStorage.getItem('albumglow_last_rgb_v1')||'null');
-  if(saved?.deviceId===deviceId && Array.isArray(saved.rgb) && saved.rgb.length===3 && saved.rgb.every(n=>Number.isInteger(n)&&n>=0&&n<=255))return saved.rgb.slice();
+  if((saved?.profile||'apollo')===controllerModel && saved?.deviceId===deviceId && Array.isArray(saved.rgb) && saved.rgb.length===3 && saved.rgb.every(n=>Number.isInteger(n)&&n>=0&&n<=255))return saved.rgb.slice();
  }catch{ /* Ignore malformed or unavailable local color history. */ }
  // Migrate the last manual color saved by the previous version, only for the
  // controller that was remembered when this page loaded.
- if(deviceId===previousDeviceId && previousManualColor){
+ if(controllerModel==='apollo' && deviceId===previousDeviceId && previousManualColor){
   try{return rgbFromHex(normalizeHex(previousManualColor))}catch{ /* invalid old value */ }
  }
  return null;
 }
 async function sendLedRgb(r,g,b,{kind='color',valid=()=>true}={}){
- const rgb=[r,g,b],deviceId=device?.id;
+ const rgb=[r,g,b],deviceId=lightDeviceId(),model=controllerModel;
  lastLedRgb=rgb;lastLedDeviceId=deviceId||null;
  if(!ledIsOn||ledPowerBusy)return; // Keep the latest desired RGB without relighting the strip.
  const gain=ledBrightness/100,power=powerGeneration;
  const scaled=rgb.map(n=>Math.max(0,Math.min(255,Math.round(n*gain))));
- await sendFrame(COLOR_FRAME(...scaled),{kind,valid:()=>power===powerGeneration && ledIsOn && valid()});
+ await sendFrames(AlbumGlowControllers.color(model,scaled),{kind,valid:()=>model===controllerModel && power===powerGeneration && ledIsOn && valid()});
  // Remember unscaled RGB, including Spotify colors. This is the last browser-
  // accepted command, not a readback of the controller or its hardware brightness.
  if(deviceId){
-  try{localStorage.setItem('albumglow_last_rgb_v1',JSON.stringify({deviceId,rgb}))}
+  try{localStorage.setItem('albumglow_last_rgb_v1',JSON.stringify({deviceId,rgb,...(model==='apollo'?{}:{profile:model})}))}
   catch{log('Could not save the last LED color in this browser')}
  }
 }
 async function setLedPower(on){
  if(ledPowerBusy)return;
- if(!device?.gatt?.connected||!char){err(Error('Connect Apollo Bluetooth first.'));return}
+ if(!lightsReady()){err(Error('Connect '+connectionName()+' first.'));return}
  ledPowerBusy=true;powerGeneration++;renderLedControls();
+ const run=powerGeneration,model=controllerModel;
  try{
-  await sendFrame(POWER_FRAME(on)); // Apollo-family power command; verify on your controller.
+  await sendFrames(AlbumGlowControllers.power(model,on),{valid:()=>run===powerGeneration&&model===controllerModel});
   ledIsOn=on;
-  $('ledControlsStatus').textContent=on?'Power ON bytes sent (unverified on this controller)':'Power OFF bytes sent (unverified on this controller)';
+  $('ledControlsStatus').textContent='Power '+(on?'ON':'OFF')+' command sent (unverified on this controller)';
   log('LED power '+(on?'ON':'OFF')+' command sent');
   ledPowerBusy=false;
   if(on && lastLedRgb){
    await sendLedRgb(...lastLedRgb);
    if(manualRequested)$('manualStatus').textContent=manualColor+' sent · brightness '+ledBrightness+'%';
   }
- }catch(e){err(e)}finally{ledPowerBusy=false;renderLedControls()}
+ }catch(e){err(e)}finally{if(run===powerGeneration){ledPowerBusy=false;renderLedControls()}}
 }
 function setLedBrightness(value){
  brightnessRequested=true;
@@ -233,9 +253,9 @@ function setLedBrightness(value){
  renderLedControls();
  $('ledControlsStatus').textContent='Brightness '+ledBrightness+'% (RGB dimming)';
  if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
- if(!device?.gatt?.connected||!char){$('ledControlsStatus').textContent='Brightness saved — connect Bluetooth to apply it.';return}
+ if(!lightsReady()){$('ledControlsStatus').textContent='Brightness saved — connect '+connectionName()+' to apply it.';return}
  if(!lastLedRgb){
-  lastLedRgb=rememberedLedColor(device.id);lastLedDeviceId=device.id;
+  lastLedRgb=rememberedLedColor(lightDeviceId());lastLedDeviceId=lightDeviceId();
   if(!lastLedRgb){
    // There is no verified command for reading an unknown controller color.
    // Use the visible manual selection and make that fallback explicit.
@@ -248,7 +268,7 @@ function setLedBrightness(value){
  const run=syncGeneration;
  brightnessTimer=setTimeout(async()=>{
   brightnessTimer=null;
-  if(run!==syncGeneration||!device?.gatt?.connected||!char)return;
+  if(run!==syncGeneration||!lightsReady())return;
   try{
    const rgb=manualRequested?rgbFromHex(manualColor):lastLedRgb;
    await sendLedRgb(...rgb,{valid:()=>run===syncGeneration});
@@ -294,6 +314,7 @@ function saveSettings(){
  }catch(e){$('settingsStatus').textContent=e.message;$('clientId').focus()}
 }
 function renderStartup(){
+ $('btBtn').disabled=pendingSelections>0;
  $('startupBtn').disabled=Boolean(startupRequest)||spotifyLoginPending||$('btBtn').disabled;
  $('startupBtn').textContent=spotifyLoginPending?'Signing in…':startupRequest?'Starting…':'Start Album Glow';
  $('spotifyBtn').disabled=spotifyLoginPending;
@@ -305,8 +326,10 @@ function cancelStartup(message='Startup cancelled. Your lights can be used manua
  renderStartup();
 }
 function completeStartup(){
- if(!startupRequest || startupRequest.deviceId!==device?.id || !char)return;
- startupRequest=null;renderStartup();startSync();
+ if(!startupRequest || startupRequest.deviceId!==lightDeviceId() || !lightsReady())return;
+ startupRequest=null;renderStartup();
+ if(syncing){$('startupStatus').textContent='Album Glow is syncing with Spotify.';scheduleNextPoll(0)}
+ else startSync();
 }
 async function startAlbumGlow(){
  if(startupRequest || spotifyLoginPending || $('btBtn').disabled)return;
@@ -321,9 +344,9 @@ async function startAlbumGlow(){
  }
  const request={deviceId:null};startupRequest=request;renderStartup();
  $('startupStatus').textContent='Connecting your lights…';
- if(device?.gatt?.connected && char){request.deviceId=device.id;completeStartup();return}
- await pickBluetooth({startup:request});
- if(startupRequest===request && !bluetooth.session)cancelStartup('No lights selected. Click Start Album Glow when you are ready.');
+ if(lightsReady()){request.deviceId=lightDeviceId();completeStartup();return}
+ await pickLights({startup:request});
+ if(startupRequest===request && !lightSession())cancelStartup('No lights selected. Click Start Album Glow when you are ready.');
 }
 function normalizeHex(value){
  let h=String(value).trim().replace(/^#/,'');
@@ -355,9 +378,9 @@ function manualColorError(e){
 async function sendManualColor(selected,version){
  try{
   const rgb=rgbFromHex(selected);
-  if(!device?.gatt?.connected||!char){
-   lastLedRgb=rgb;lastLedDeviceId=device?.id||null;
-   $('manualStatus').textContent=selected+' saved — connect Bluetooth to apply it.';return;
+  if(!lightsReady()){
+   lastLedRgb=rgb;lastLedDeviceId=lightDeviceId()||null;
+   $('manualStatus').textContent=selected+' saved — connect '+connectionName()+' to apply it.';return;
   }
   const run=syncGeneration;
   await sendLedRgb(...rgb,{valid:()=>!syncing&&run===syncGeneration&&version===manualColorVersion});
@@ -444,47 +467,102 @@ async function spotifyAccess(){
  const data=await tokenPost({client_id:getClient(),grant_type:'refresh_token',refresh_token:spotifyToken.refresh});setTokens(data);return spotifyToken.access;
 }
 function spotifyLogout(){spotifyToken=null;localStorage.removeItem('albumglow_tokens');stopSync();status('spotify','Disconnected locally. Revoke app access in Spotify account settings if desired.')}
-// GATT state and the write queue live in one small, separately tested helper.
+function clearLightReferences(){
+ char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
+ if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
+ $('characteristic').replaceChildren();
+ enableColorTests(false);
+ if(syncing)$('syncStatus').textContent='Sync paused — waiting for '+connectionName();
+}
+function restoreLightIntent(){
+ syncGeneration++;currentAlbum='';$('alert').textContent='';
+ $('ledControlsStatus').textContent='Connected · brightness '+ledBrightness+'% (RGB dimming).';
+ if(!manualRequested)$('manualStatus').textContent='Choose a preset or custom color.';
+ renderLedControls();
+ if(startupRequest){completeStartup()}
+ else if(syncing)scheduleNextPoll(0);
+ else if(manualRequested){
+  const rgb=rgbFromHex(manualColor),run=syncGeneration;
+  sendLedRgb(...rgb,{valid:()=>!syncing&&run===syncGeneration}).then(()=>{
+   if(run===syncGeneration)$('manualStatus').textContent=ledIsOn?manualColor+' sent · brightness '+ledBrightness+'%':manualColor+' saved for when LEDs are turned on.';
+  }).catch(err);
+ }
+ else if(brightnessRequested)setLedBrightness(ledBrightness);
+}
+// Each transport owns its connection lifecycle and serialized write queue.
 const bluetooth=new AlbumGlowBluetooth({
  storage:localStorage,
  log,
  onState:message=>{
+  if(isUSB())return;
   status('bt',message);
   if(startupRequest){
    $('startupStatus').textContent=message;
    if(message.startsWith('Automatic retries stopped')){startupRequest=null;renderStartup()}
   }
  },
- onClear:()=>{
-  char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
-  if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
-  $('characteristic').replaceChildren();
-  enableColorTests(false);
-  if(syncing)$('syncStatus').textContent='Sync paused — waiting for Bluetooth';
- },
+ onClear:clearLightReferences,
  onUnconfirmed:()=>{$('confirmed').checked=false;stopSync({cancelPendingStartup:false})},
  onReady:({device:connected,entries,index})=>{
   device=connected;writable=entries;char=entries[index].c;
   if(lastLedDeviceId!==connected.id||!lastLedRgb){lastLedRgb=rememberedLedColor(connected.id);lastLedDeviceId=connected.id;}
-  syncGeneration++;currentAlbum='';
   const sel=$('characteristic');sel.replaceChildren();
   entries.forEach(({c,service},i)=>{
    const opt=document.createElement('option');opt.value=String(i);
    opt.textContent=service+' → '+c.uuid;sel.append(opt);
   });
   sel.value=String(index);enableColorTests(true);
-  $('alert').textContent='';
-  if(startupRequest){completeStartup()}
-  else if(syncing)scheduleNextPoll(0);
-  else if(manualRequested){
-   const rgb=[1,3,5].map(i=>parseInt(manualColor.slice(i,i+2),16)),run=syncGeneration;
-   sendLedRgb(...rgb,{valid:()=>!syncing && run===syncGeneration}).then(()=>{
-    if(run===syncGeneration)$('manualStatus').textContent=ledIsOn?manualColor+' sent · brightness '+ledBrightness+'%':manualColor+' saved for when LEDs are turned on.';
-   }).catch(err);
-  }
-  else if(brightnessRequested)setLedBrightness(ledBrightness);
+  restoreLightIntent();
  }
 });
+const usb=new AlbumGlowSerial({
+ log,
+ onState:message=>{
+  if(!isUSB())return;
+  $('btStatus').textContent=message;log(message.startsWith('USB:')?message:'USB: '+message);
+  if(startupRequest)$('startupStatus').textContent=message;
+ },
+ onClear:clearLightReferences,
+ onReady:({id,state})=>{
+  ledIsOn=state.on;
+  if(lastLedDeviceId!==id||!lastLedRgb){
+   lastLedRgb=rememberedLedColor(id);lastLedDeviceId=id;
+   const rgb=state.seg[0]?.col?.[0];
+   if(!lastLedRgb&&Array.isArray(rgb)&&rgb.length>=3&&rgb.slice(0,3).every(n=>Number.isInteger(n)&&n>=0&&n<=255))lastLedRgb=rgb.slice(0,3);
+  }
+  enableColorTests(true);restoreLightIntent();
+ }
+});
+function renderController(){
+ $('controllerProfile').value=controllerModel;
+ $('controllerSummary').textContent=profile().name;
+ $('btBtn').textContent='Connect '+connectionName();
+ $('changeDeviceBtn').textContent=isUSB()?'Choose USB port':'Choose different lights';
+ $('customService').disabled=controllerModel!=='apollo';
+ $('characteristic').disabled=isUSB();$('confirmed').disabled=isUSB();
+ if(!isUSB())bluetooth.cacheKey=profile().cacheKey;
+ $('controllerHelp').textContent=controllerModel==='sp630e'?
+  'Set SP630E to PWM RGB in BanlanX once, then close BanlanX before connecting here. New controller support needs testing with your lights.':isUSB()?
+  'Set WLED to PWM RGB with R=25, G=26, B=27 once. Keep the 12 V supply connected and use a USB data cable. Open Album Glow in its own Chrome tab.':
+  'Your original Apollo Bluetooth connection and saved settings are kept.';
+ $('powerNote').textContent=controllerModel==='apollo'?
+  'Brightness dims RGB output. Apollo power commands still need confirmation on your controller.':
+  'Brightness dims RGB output. Confirm the new controller responds to color and power controls.';
+}
+function changeController(value){
+ if(!Object.hasOwn(AlbumGlowControllers.profiles,value)){renderController();return}
+ if(value===controllerModel)return;
+ btDisconnect();
+ controllerModel=value;localStorage.setItem('albumglow_controller',value);
+ lastLedRgb=null;lastLedDeviceId=null;manualRequested=false;brightnessRequested=false;ledIsOn=true;
+ renderController();renderLedControls();renderStartup();
+ $('btStatus').textContent='Not connected';
+ $('manualStatus').textContent='Connect '+connectionName()+' to apply a color.';
+ $('ledControlsStatus').textContent='Connect '+connectionName()+' to use power controls.';
+ $('startupStatus').textContent=profile().name+' selected. Connect to test colors, or use Start Album Glow.';
+ log('Controller selected: '+profile().name);
+}
+function pickLights(options){return isUSB()?pickUSB(options):pickBluetooth(options)}
 function requireBluetoothAccess(){
  if(!navigator.bluetooth)throw Error('Web Bluetooth is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
  const policy=document.permissionsPolicy||document.featurePolicy;
@@ -495,28 +573,30 @@ function requireBluetoothAccess(){
  }
 }
 async function pickBluetooth({startup=null,forceChooser=false}={}){
- if($('btBtn').disabled)return false;
+ if($('btBtn').disabled||isUSB())return false;
  if(!startup)cancelStartup();
  if(device?.gatt?.connected && char && !forceChooser)return true;
  const selection=++selectionGeneration;
- $('btBtn').disabled=true;renderStartup();
+ const selected=profile();
+ pendingSelections++;renderStartup();
  try{
   $('alert').textContent='';
   requireBluetoothAccess();
-  let services=[...COMMON_SERVICES];
-  const cached=bluetooth.cachedEndpoint();if(cached)services.push(cached.service);
+  let services=selected.services?[...selected.services]:[...COMMON_SERVICES];
+  const cached=bluetooth.cachedEndpoint();if(cached&&!selected.services)services.push(cached.service);
   const custom=$('customService').value.trim();
-  if(custom)services.push(/^(?:0x)?[a-f\d]{4}$/i.test(custom)?parseInt(custom.replace(/^0x/i,''),16):custom);
-  const savedId=localStorage.getItem('albumglow_device')||cached?.deviceId;
+  if(custom&&!selected.services)services.push(/^(?:0x)?[a-f\d]{4}$/i.test(custom)?parseInt(custom.replace(/^0x/i,''),16):custom);
+  const savedId=localStorage.getItem(selected.deviceKey)||cached?.deviceId;
   const remembered=!forceChooser && grantedDevices.find(d=>d.id===savedId);
   log(remembered?'BT: reconnecting previously approved lights':'BT: device selection requested (Chrome chooser)');
   // Granted devices are loaded before this click. If unavailable, call the
   // chooser immediately from this gesture, without awaiting getDevices first.
-  const picking=remembered?Promise.resolve(remembered):navigator.bluetooth.requestDevice({filters:[{namePrefix:'AP-'}],optionalServices:[...new Set(services)]});
+  const picking=remembered?Promise.resolve(remembered):navigator.bluetooth.requestDevice({
+   ...(selected.services?{acceptAllDevices:true}:{filters:[{namePrefix:'AP-'}]}),optionalServices:[...new Set(services)]});
   const picked=await picking;
   if(selection!==selectionGeneration){log('BT: ignored device selection after Disconnect');return false}
   log('BT: device selection complete: '+picked.name);
-  localStorage.setItem('albumglow_device',picked.id);
+  localStorage.setItem(selected.deviceKey,picked.id);
   grantedDevices=[picked,...grantedDevices.filter(d=>d.id!==picked.id)];
   if(startup)startup.deviceId=picked.id;
   // The old session may already be ready, including after an automatic retry
@@ -528,14 +608,68 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
   }
   stopSync({cancelPendingStartup:false});$('confirmed').checked=false;
   device=picked;
-  await bluetooth.useDevice(picked);
+  await bluetooth.useDevice(picked,{endpoint:selected.services?{services:selected.services,characteristic:selected.characteristic}:null});
   return Boolean(char && picked.gatt.connected);
  }catch(e){
   if(e.name==='NotFoundError')log('BT: device selection cancelled or no matching controller selected');
   else err(Error('Bluetooth selection/setup — '+e.name+': '+e.message));
   if(startupRequest===startup)cancelStartup('Startup stopped. Check the connection log, then try again.');
   return false;
- }finally{$('btBtn').disabled=false;renderLedControls();renderStartup()}
+ }finally{pendingSelections--;renderLedControls();renderStartup()}
+}
+function usbInfo(){
+ try{
+  const info=JSON.parse(localStorage.getItem('albumglow_usb_info')||'null');
+  return info&&['usbVendorId','usbProductId'].every(k=>Number.isInteger(info[k])&&info[k]>=0&&info[k]<=65535)?info:null;
+ }catch{return null}
+}
+async function loadGrantedPorts(){
+ if(!navigator.serial?.getPorts)return;
+ const version=usbGrantVersion;
+ try{
+  const ports=await navigator.serial.getPorts();
+  if(version===usbGrantVersion)grantedPorts=ports;
+ }catch{log('USB: saved port access unavailable; the next Connect click will use the chooser')}
+}
+async function pickUSB({startup=null,forceChooser=false}={}){
+ if($('btBtn').disabled||!isUSB())return false;
+ if(!startup)cancelStartup();
+ if(usb.session?.ready&&!forceChooser)return true;
+ const selection=++selectionGeneration;
+ pendingSelections++;renderStartup();
+ try{
+  $('alert').textContent='';
+  if(!navigator.serial?.requestPort)throw Error('USB serial is unavailable. Open the HTTPS website in Chrome on your Chromebook.');
+  const policy=document.permissionsPolicy||document.featurePolicy;
+  if((!policy?.features||policy.features().includes('serial'))&&policy?.allowsFeature?.('serial')===false)throw Error('Open Album Glow directly in its own Chrome tab; this embedded page blocks USB serial.');
+  const saved=usbInfo();
+  const matches=saved?grantedPorts.filter(port=>{
+   const info=port.getInfo();return info.usbVendorId===saved.usbVendorId&&info.usbProductId===saved.usbProductId;
+  }):[];
+  const remembered=!forceChooser&&matches.length===1?matches[0]:null;
+  log(remembered?'USB: reconnecting the previously approved controller':'USB: port selection requested (choose the SP803E USB serial port)');
+  // Keep requestPort in the click gesture; never await getPorts before it.
+  const picking=remembered?Promise.resolve(remembered):navigator.serial.requestPort();
+  const picked=await picking;
+  if(selection!==selectionGeneration){log('USB: ignored port selection after Disconnect or controller change');return false}
+  usbGrantVersion++;grantedPorts=[picked,...grantedPorts.filter(port=>port!==picked)];
+  if(startup)startup.deviceId=AlbumGlowSerial.portId(picked);
+  if(usb.session?.ready&&usb.session.port===picked){if(startupRequest===startup)completeStartup();return true}
+  // A cable loss keeps sync intent paused. Reopening it may resume that intent;
+  // deliberately replacing a live port stops sync, like choosing new BLE lights.
+  if(usb.session)stopSync({cancelPendingStartup:false});
+  const ready=await usb.usePort(picked);
+  if(ready&&selection===selectionGeneration){
+   const info=picked.getInfo();
+   if(['usbVendorId','usbProductId'].every(k=>Number.isInteger(info[k])))localStorage.setItem('albumglow_usb_info',JSON.stringify(info));
+  }
+  return ready;
+ }catch(e){
+  if(e.name==='NotFoundError')log('USB: port selection cancelled');
+  else err(Error('USB selection/setup — '+e.name+': '+e.message));
+  if(startupRequest===startup)cancelStartup('USB startup stopped. Check the connection log, then try again.');
+  return false;
+ }finally{pendingSelections--;renderLedControls();renderStartup()}
 }
 async function loadGrantedDevices(){
  if(!navigator.bluetooth?.getDevices)return;
@@ -550,7 +684,8 @@ function enableColorTests(enabled){
  for(const id of ['testBtn','testGreen','testBlue'])$(id).disabled=!enabled;
  renderLedControls();
 }
-function sendFrame(frame,options){return bluetooth.write(frame,options)}
+function sendFrame(frame,options){return (isUSB()?usb:bluetooth).write(frame,options)}
+function sendFrames(frames,options){return (isUSB()?usb:bluetooth).writeBatch(frames,options)}
 async function testColor(r,g,b){
  try{
   if(!ledIsOn)throw Error('Turn LEDs on before running a color test.');
@@ -562,11 +697,15 @@ async function testColor(r,g,b){
 }
 function btDisconnect(){
  selectionGeneration++;
+ powerGeneration++;ledPowerBusy=false;
  stopSync();$('confirmed').checked=false;
  bluetooth.disconnect();
+ usb.disconnect();
  device=null;char=null;writable=[];
  enableColorTests(false);
- $('characteristic').replaceChildren();status('bt','Disconnected');
+ $('characteristic').replaceChildren();
+ if(isUSB()){$('btStatus').textContent='Disconnected';log('USB: Disconnected')}
+ else status('bt','Disconnected');
 }
 function hex(c){return '#'+c.map(v=>v.toString(16).padStart(2,'0')).join('').toUpperCase()}
 // Convert a cover's RGB to a more saturated LED color, keeping its hue.
@@ -650,10 +789,10 @@ async function updateSong(payload,run=syncGeneration){
  log('Album '+album.name+' → original '+hex(color)+' → LEDs '+hex(ledColor));
  // Album color is computed before recording album ID; a failed BLE write can be retried.
  if(syncing){
-  const target=char;
-  if(!target || !device?.gatt.connected)return;
+  const target=lightSession();
+  if(!target || !lightsReady())return;
   await sendLedRgb(...ledColor,{valid:()=>syncing && run===syncGeneration});
-  if(target!==char || run!==syncGeneration)return;
+  if(target!==lightSession() || run!==syncGeneration)return;
  }
  currentAlbum=album.id;
 }
@@ -675,7 +814,7 @@ function scheduleNextPoll(ms){
  }, Math.max(0,ms));
 }
 async function checkSpotify(){
- if(polling || (syncing && !char))return;
+ if(polling || (syncing && !lightsReady()))return;
  if(Date.now()<rateLimitUntil){
   const secs=Math.ceil((rateLimitUntil-Date.now())/1000);
   $('syncStatus').textContent='Spotify rate-limit cooldown: '+secs+'s remaining';
@@ -721,8 +860,7 @@ async function checkSpotify(){
 }
 function startSync(){
  if(!spotifyToken){err(Error('Connect Spotify first, or use a manual color.'));return}
- if(!device?.gatt?.connected){err(Error('Connect Bluetooth first, or use Start Album Glow to connect and sync.'));return}
- if(!writable.length){err(Error('No writable LED characteristic was found.'));return}
+ if(!lightsReady()){err(Error('Connect '+connectionName()+' first, or use Start Album Glow to connect and sync.'));return}
  if(syncing)return;
  cancelStartup();cancelLiveColorInput();manualRequested=false;
  $('startupStatus').textContent='Album Glow is syncing with Spotify.';
@@ -745,8 +883,9 @@ function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
 $('spotifyBtn').onclick=spotifyConnect;
 $('logoutSpotifyBtn').onclick=spotifyLogout;
 enableColorTests(false);
-$('btBtn').onclick=()=>pickBluetooth();
-$('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickBluetooth({forceChooser:true}) };
+$('btBtn').onclick=()=>pickLights();
+$('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickLights({forceChooser:true}) };
+$('controllerProfile').onchange=()=>changeController($('controllerProfile').value);
 $('startupBtn').onclick=startAlbumGlow;
 $('btDisconnectBtn').onclick=btDisconnect;
 globalThis.addEventListener('pagehide',btDisconnect);
@@ -784,7 +923,7 @@ $('vividColors').onchange=async()=>{
  if(!originalAlbumColor)return;
  const ledColor=updateColorDisplay(originalAlbumColor);
  log('Vivid mode '+($('vividColors').checked?'on':'off')+' → '+hex(ledColor));
- if(syncing && device?.gatt?.connected){const run=syncGeneration;try{await sendLedRgb(...ledColor,{valid:()=>syncing && run===syncGeneration})}catch(e){err(e)}}
+ if(syncing && lightsReady()){const run=syncGeneration;try{await sendLedRgb(...ledColor,{valid:()=>syncing && run===syncGeneration})}catch(e){err(e)}}
 };
 $('startBtn').onclick=startSync;
 $('stopBtn').onclick=()=>{stopSync();$('startupStatus').textContent='Sync stopped. Pick a manual color or start Album Glow again.'};
@@ -806,8 +945,15 @@ $('manualHex').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();queueManualC
 $('copyLogBtn').onclick=copyConnectionLog;
 for(const button of document.querySelectorAll('[data-color]'))button.onclick=()=>applyManualColor(button.dataset.color);
 try{manualColor=normalizeHex(manualColor)}catch{manualColor='#FF0000'}
-showManualColor(manualColor);renderStartup();
+renderController();showManualColor(manualColor);renderStartup();
 loadGrantedDevices();
+loadGrantedPorts();
+navigator.serial?.addEventListener?.('connect',()=>{usbGrantVersion++;loadGrantedPorts()});
+navigator.serial?.addEventListener?.('disconnect',event=>{
+ usbGrantVersion++;
+ const lost=event.port||event.target;
+ grantedPorts=grantedPorts.filter(port=>port!==lost);
+});
 finishSpotifyRedirect();
 </script>
 </body>
