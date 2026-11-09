@@ -2,6 +2,8 @@
 
 For the completed code audit and version-matched Chromium evidence, read [Bluetooth connection investigation](BLUETOOTH-INVESTIGATION.md). It distinguishes the native connection failure from the application safeguards fixed during the audit.
 
+For the purchased **SP630E Bluetooth / SP803E USB** comparison, use [CONTROLLERS.md](CONTROLLERS.md). This page describes the original Apollo findings and acceptance procedure; its UUIDs and protocol assumptions do not identify the replacement hardware.
+
 ## What the source actually showed
 
 | Finding in the imported version | Targeted change |

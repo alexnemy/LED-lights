@@ -69,6 +69,61 @@ test('initial discovery logs each stage and never sends speculative commands', a
   assert.throws(()=>f.bt.confirm(), /manual color test/);
 });
 
+test('a model endpoint tries only its supported services and exact writable characteristic', async()=>{
+  const f=fixture(),get=f.device.gatt.getPrimaryService;
+  const first='0000e0ff-0000-1000-8000-00805f9b34fb';
+  f.device.gatt.getPrimaryService=async id=>{
+    f.calls.push('model-service:'+id);
+    if(id===first)throw new DOMException('Absent','NotFoundError');
+    return get(id);
+  };
+  await f.bt.useDevice(f.device,{endpoint:{services:[first,serviceId],characteristic:charId}});
+  assert.equal(f.ready,1);assert.equal(f.writes.length,0);
+  assert.ok(f.calls.includes('model-service:'+first));
+  assert.ok(f.calls.includes('model-service:'+serviceId));
+  assert.ok(!f.calls.includes('services'));assert.ok(!f.calls.includes('characteristics'));
+});
+
+test('an unrelated saved endpoint cannot bypass the selected model endpoint', async()=>{
+  const f=fixture();
+  f.storage.set('albumglow_ble_endpoint_v1',JSON.stringify({deviceId:f.device.id,service:serviceId,characteristic:'0000ffff-0000-1000-8000-00805f9b34fb'}));
+  await f.bt.useDevice(f.device,{endpoint:{services:[serviceId],characteristic:charId}});
+  assert.equal(f.ready,1);assert.equal(f.bt.session.verified,false);
+  assert.equal(f.bt.session.characteristic.uuid,charId);assert.ok(!f.calls.includes('services'));
+});
+
+test('a missing model endpoint never falls back to unrelated writable characteristics', async()=>{
+  const f=fixture();
+  f.device.gatt.getPrimaryService=async()=>{throw new DOMException('Absent','NotFoundError');};
+  await f.bt.useDevice(f.device,{endpoint:{services:[serviceId],characteristic:charId}});
+  assert.equal(f.ready,0);assert.equal(f.writes.length,0);
+  assert.ok(!f.calls.includes('services'));assert.ok(f.messages.some(s=>s.includes('SP630E endpoint was not found')));
+});
+
+test('multi-frame colors stay together and preserve spacing before a queued power command', async()=>{
+  const f=fixture();await f.bt.useDevice(f.device);
+  const color=f.bt.writeBatch([[1],[2]],{kind:'color'});await settle();
+  const power=f.bt.write([3]);await f.timers.advance(100);await color;
+  await f.timers.advance(100);await power;
+  assert.deepEqual(f.writes.map(w=>w.bytes),[[1],[2],[3]]);
+  assert.deepEqual(f.writes.map(w=>w.at),[0,100,200]);
+});
+
+test('disconnect between frames cancels the rest of a color batch', async()=>{
+  const f=fixture();await f.bt.useDevice(f.device);
+  const color=assert.rejects(f.bt.writeBatch([[1],[2]],{kind:'color'}),{name:'AbortError'});await settle();
+  f.bt.disconnect();await f.timers.advance(100);await color;
+  assert.deepEqual(f.writes.map(w=>w.bytes),[[1]]);
+});
+
+test('invalid Bluetooth batches cannot count as successful color tests', async()=>{
+  const f=fixture();await f.bt.useDevice(f.device);
+  await assert.rejects(f.bt.writeBatch([],{kind:'test'}),/one to four/);
+  await assert.rejects(f.bt.writeBatch([[]],{kind:'test'}),/must not be empty/);
+  await assert.rejects(f.bt.writeBatch([[1],[2],[3],[4],[5]]),/one to four/);
+  assert.throws(()=>f.bt.confirm(),/manual color test/);assert.equal(f.writes.length,0);
+});
+
 test('confirmed endpoint reconnects directly with freshly acquired characteristic', async () => {
   const f=fixture(); await f.bt.useDevice(f.device);
   const before=f.bt.session.characteristic;

@@ -6,8 +6,10 @@ const fs = require('node:fs');
 const html = fs.readFileSync(require.resolve('../index.html'),'utf8');
 const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const helper = fs.readFileSync(require.resolve('../bluetooth.js'),'utf8');
+const profiles = fs.readFileSync(require.resolve('../controller-protocols.js'),'utf8');
+const serialHelper = fs.readFileSync(require.resolve('../serial.js'),'utf8');
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
-function harness(t, {search='', session={}, saved={}, requestDevice, getDevices, fetch:fetchOverride}={}) {
+function harness(t, {search='', session={}, saved={}, requestDevice, getDevices, serial, fetch:fetchOverride}={}) {
   const elements=new Map(), writes=[], requests=[], redirects=[], chooserCalls=[];
   const windowEvents={},documentEvents={};
   const listen=(events,type,listener)=>(events[type]??=[]).push(listener);
@@ -25,20 +27,20 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
     gatt:{connected:false,async connect(){this.connected=true;return this;},disconnect(){this.connected=false;for(const f of listeners)f();},
       async getPrimaryServices(){return [{uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristics(){return [c];}}];},
       async getPrimaryService(){return {uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristic(){return c;}};}}};
-  const sandbox={console,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
+  const sandbox={console,URLSearchParams,URL,TextEncoder,TextDecoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
     btoa:s=>Buffer.from(s,'binary').toString('base64'),setTimeout,clearTimeout,
     addEventListener:(type,listener)=>listen(windowEvents,type,listener),
     document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener:(type,listener)=>listen(documentEvents,type,listener),hidden:false},
     localStorage:storage(saved),sessionStorage:storage(session),
-    navigator:{bluetooth:{requestDevice:(...args)=>{chooserCalls.push(args);return requestDevice?requestDevice(...args):Promise.resolve(device);},...(getDevices?{getDevices:()=>getDevices(device)}:{})}},
+    navigator:{...(serial?{serial}:{}),bluetooth:{requestDevice:(...args)=>{chooserCalls.push(args);return requestDevice?requestDevice(...args):Promise.resolve(device);},...(getDevices?{getDevices:()=>getDevices(device)}:{})}},
     location:{origin:'https://cosmic-snickerdoodle-3a661b.netlify.app',pathname:'/',protocol:'https:',search,assign:url=>redirects.push(url)},
     history:{replaceState(){}},
     fetch:fetchOverride|| (async(url,options)=>{requests.push({url,options});return {ok:true,status:204,headers:{get:()=>null}};})};
   const context=vm.createContext(sandbox);
-  vm.runInContext(helper,context);vm.runInContext(source,context);
+  vm.runInContext(helper,context);vm.runInContext(profiles,context);vm.runInContext(serialHelper,context);vm.runInContext(source,context);
   const run=code=>vm.runInContext(code,context);
   run('bluetooth.writeGap=0');
-  t.after(()=>run('btDisconnect()'));
+  t.after(async()=>{run('btDisconnect()');await run('usb.operations');});
   return {context,run,element,writes,requests,redirects,device,c,chooserCalls,
     dispatchWindow:(type,event)=>dispatch(windowEvents,type,event),dispatchDocument:(type,event)=>dispatch(documentEvents,type,event),
     async connect(){await run('pickBluetooth()');}};
@@ -615,4 +617,205 @@ test('Copy log falls back to browser selection copy when Clipboard API is unavai
   const h=harness(t);h.context.document.execCommand=command=>command==='copy';
   await h.run('copyConnectionLog()');
   assert.equal(h.element('logCopyFallback').hidden,true);assert.match(h.element('logCopyStatus').textContent,/Log copied/);
+});
+
+function serialFixture({granted=true,state={on:true,bri:255,seg:[{col:[[18,52,86]]}]}}={}){
+  const writes=[],events={connect:new Set(),disconnect:new Set()};let input,choosers=0,opens=0,closes=0;
+  const port={getInfo:()=>({usbVendorId:0x1a86,usbProductId:0x7523}),
+    async open(){
+      opens++;
+      this.readable=new ReadableStream({start(controller){input=controller;}});
+      this.writable=new WritableStream({write(bytes){
+        const text=new TextDecoder().decode(bytes);writes.push(text);
+        if(text==='{\"v\":true}\n')input.enqueue(new TextEncoder().encode(JSON.stringify({info:{ver:'0.16.0'},state})+'\n'));
+      }});
+    },
+    async close(){closes++;this.readable=null;this.writable=null;}
+  };
+  const serial={getPorts:async()=>granted?[port]:[],requestPort(){choosers++;return Promise.resolve(port);},
+    addEventListener:(name,listener)=>events[name].add(listener),removeEventListener:(name,listener)=>events[name].delete(listener)};
+  return {serial,port,writes,drop(){for(const listener of [...events.disconnect])listener({port});},
+    plug(connected=port){for(const listener of [...events.connect])listener({port:connected});},
+    get choosers(){return choosers;},get opens(){return opens;},get closes(){return closes;}};
+}
+const usbSaved=()=>({albumglow_controller:'sp803e',albumglow_usb_info:JSON.stringify({usbVendorId:0x1a86,usbProductId:0x7523})});
+
+test('the controller choice defaults to Apollo and rejects unknown stored profiles', t=>{
+  const h=harness(t,{saved:{albumglow_controller:'__proto__'}});
+  assert.equal(h.element('controllerProfile').value,'apollo');assert.equal(h.element('btBtn').textContent,'Connect Bluetooth');
+  assert.equal(h.element('controllerSummary').textContent,'Apollo · Bluetooth');
+});
+
+test('changing the controller stops sync, disconnects, and keeps Spotify/general settings', async t=>{
+  const saved={...savedSpotify(),albumglow_brightness:'40',albumglow_manual_color:'#123456'};
+  const h=harness(t,{saved});await h.connect();h.run('startSync()');
+  h.element('controllerProfile').value='sp630e';h.element('controllerProfile').onchange();
+  assert.equal(h.run('syncing'),false);assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.run('bluetooth.session'),null);assert.equal(h.run('lastLedRgb'),null);
+  assert.equal(h.context.localStorage.getItem('albumglow_controller'),'sp630e');
+  for(const [key,value] of Object.entries(saved))assert.equal(h.context.localStorage.getItem(key),value);
+  assert.match(h.element('controllerHelp').textContent,/PWM RGB/);
+});
+
+test('SP630E selects its endpoint and sends a complete static-color batch without Apollo bytes', async t=>{
+  const h=harness(t,{saved:{albumglow_controller:'sp630e',albumglow_brightness:'50'}});await h.connect();
+  assert.equal(h.chooserCalls[0][0].acceptAllDevices,true);
+  assert.equal(h.chooserCalls[0][0].optionalServices.length,2);
+  assert.equal(h.writes.length,0);await h.run('applyManualColor("#FF0080")');
+  assert.deepEqual(h.writes,[[0x53,0x53,0,1,0,2,1,1],[0x53,0x52,0,1,0,4,128,0,64,255]]);
+  assert.deepEqual(JSON.parse(h.context.localStorage.getItem('albumglow_last_rgb_v1')),{deviceId:'mock',rgb:[255,0,128],profile:'sp630e'});
+  assert.equal(h.run('syncing'),false);
+});
+
+test('SP630E power preserves off suppression and restores the manual color on power-on', async t=>{
+  const h=harness(t,{saved:{albumglow_controller:'sp630e'}});await h.connect();
+  await h.run('setLedPower(false)');assert.deepEqual(h.writes.at(-1),[0x53,0x50,0,1,0,1,0]);
+  const count=h.writes.length;await h.run('applyManualColor("#0000FF")');assert.equal(h.writes.length,count);
+  await h.run('setLedPower(true)');
+  assert.deepEqual(h.writes.slice(-3),[[0x53,0x50,0,1,0,1,1],[0x53,0x53,0,1,0,2,1,1],[0x53,0x52,0,1,0,4,0,0,255,255]]);
+});
+
+test('SP630E saved devices and verified endpoints do not replace Apollo settings', async t=>{
+  const h=harness(t,{saved:{albumglow_device:'original-apollo',albumglow_controller:'sp630e'}});await h.connect();
+  await h.run('testColor(255,0,0)');h.element('confirmed').checked=true;h.element('confirmed').onchange();
+  assert.equal(h.context.localStorage.getItem('albumglow_device'),'original-apollo');
+  assert.equal(h.context.localStorage.getItem('albumglow_sp630e_device'),'mock');
+  assert.ok(h.context.localStorage.getItem('albumglow_sp630e_endpoint_v1'));
+  assert.equal(h.context.localStorage.getItem('albumglow_ble_endpoint_v1'),null);
+});
+
+test('SP630E connection failure retains bounded retries without sending protocol packets', async t=>{
+  const h=harness(t,{saved:{albumglow_controller:'sp630e'}});let attempts=0;
+  h.device.gatt.connect=async()=>{attempts++;throw new DOMException('native failure','NetworkError');};
+  await h.connect();
+  for(let i=0;i<4;i++)await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  assert.equal(attempts,5);assert.equal(h.writes.length,0);assert.equal(h.run('char'),null);
+  assert.match(h.element('btStatus').textContent,/Automatic retries stopped/);
+});
+
+test('USB manual controls identify WLED first and never request Bluetooth', async t=>{
+  const f=serialFixture();const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();
+  assert.equal(h.element('btBtn').textContent,'Connect USB');assert.equal(h.element('confirmed').disabled,true);
+  await h.run('pickLights()');assert.equal(f.choosers,0);assert.equal(h.chooserCalls.length,0);
+  assert.equal(h.run('lightsReady()'),true);assert.equal(h.run('char'),null);
+  assert.deepEqual(f.writes,['{"v":true}\n']);
+  await h.run('applyManualColor("#00FF80")');
+  assert.deepEqual(JSON.parse(f.writes.at(-1)).seg[0].col[0],[0,255,128]);assert.equal(h.writes.length,0);
+});
+
+test('USB brightness keeps unscaled color history and power-off suppresses manual writes', async t=>{
+  fakeTime(t);const f=serialFixture();const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();await h.run('pickLights()');
+  h.run('usb.writeGap=0');await h.run('applyManualColor("#12AAEE")');
+  h.run('setLedBrightness(50)');t.mock.timers.tick(250);await settle();
+  assert.deepEqual(JSON.parse(f.writes.at(-1)).seg[0].col[0],[9,85,119]);
+  assert.deepEqual(JSON.parse(h.context.localStorage.getItem('albumglow_last_rgb_v1')).rgb,[18,170,238]);
+  await h.run('setLedPower(false)');assert.equal(JSON.parse(f.writes.at(-1)).on,false);
+  const count=f.writes.length;await h.run('applyManualColor("#0000FF")');assert.equal(f.writes.length,count);
+  await h.run('setLedPower(true)');assert.deepEqual(JSON.parse(f.writes.at(-1)).seg[0].col[0],[0,0,128]);
+});
+
+test('USB uses reported WLED power state without an initialization power/color command', async t=>{
+  const f=serialFixture({state:{on:false,bri:0,seg:[{col:[[1,2,3]]}]}});
+  const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();await h.run('pickLights()');
+  assert.equal(h.run('ledIsOn'),false);assert.equal(h.element('ledPowerBtn').textContent,'Turn LEDs on');
+  assert.deepEqual(f.writes,['{"v":true}\n']);
+  await h.run('applyManualColor("#FF0000")');assert.equal(f.writes.length,1);
+});
+
+test('one-click USB startup uses the saved port and starts Spotify after identity succeeds', async t=>{
+  fakeTime(t);const f=serialFixture();const h=harness(t,{serial:f.serial,saved:{...savedSpotify(),...usbSaved()}});await settle();
+  await h.run('startAlbumGlow()');assert.equal(h.run('syncing'),true);
+  assert.equal(f.choosers,0);assert.equal(h.chooserCalls.length,0);
+  assert.equal(h.run('startupRequest'),null);assert.equal(h.element('startupBtn').disabled,false);
+  assert.equal(h.element('redirect').value,'https://cosmic-snickerdoodle-3a661b.netlify.app/');
+});
+
+test('first USB connection requests a port synchronously from the click gesture', async t=>{
+  const f=serialFixture({granted:false});const h=harness(t,{serial:f.serial,saved:{albumglow_controller:'sp803e'}});
+  const pick=h.run('pickLights()');assert.equal(f.choosers,1);await pick;
+  assert.equal(h.run('lightsReady()'),true);assert.equal(h.chooserCalls.length,0);
+});
+
+test('multiple permitted USB ports with identical IDs require a chooser instead of guessing', async t=>{
+  const f=serialFixture();f.serial.getPorts=async()=>[f.port,{getInfo:f.port.getInfo}];
+  const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();await h.run('pickLights()');
+  assert.equal(f.choosers,1);
+});
+
+test('USB access errors and frame policy restrictions give guidance without a chooser', async t=>{
+  const h=harness(t,{saved:{albumglow_controller:'sp803e'}});await h.run('pickLights()');
+  assert.match(h.element('alert').textContent,/USB serial is unavailable/);assert.equal(h.element('btBtn').disabled,false);
+  const f=serialFixture();const blocked=harness(t,{serial:f.serial,saved:usbSaved()});
+  blocked.context.document.permissionsPolicy={allowsFeature:()=>false};await blocked.run('pickLights()');
+  assert.equal(f.choosers,0);assert.equal(f.opens,0);assert.match(blocked.element('alert').textContent,/own Chrome tab/);
+});
+
+test('leaving the page invalidates a pending USB chooser and cannot reconnect late', async t=>{
+  const f=serialFixture({granted:false});let finish;f.serial.requestPort=()=>new Promise(resolve=>{finish=resolve;});
+  const h=harness(t,{serial:f.serial,saved:{albumglow_controller:'sp803e'}});
+  const pick=h.run('pickLights()');h.dispatchWindow('pagehide');finish(f.port);await pick;
+  assert.equal(f.opens,0);assert.equal(h.run('usb.session'),null);
+});
+
+test('a late USB grant preload does not replace the newer chosen port', async t=>{
+  const f=serialFixture({granted:false});let finish;f.serial.getPorts=()=>new Promise(resolve=>{finish=resolve;});
+  const h=harness(t,{serial:f.serial,saved:usbSaved()});await h.run('pickLights()');
+  finish([{getInfo:f.port.getInfo}]);await settle();
+  assert.equal(h.run('grantedPorts[0]'),f.port);
+  h.run('btDisconnect()');await h.run('usb.operations');await h.run('pickLights()');assert.equal(f.choosers,1);
+});
+
+test('USB cable loss pauses Spotify and a user reconnect resumes the previous sync intent', async t=>{
+  fakeTime(t);const f=serialFixture();const h=harness(t,{serial:f.serial,saved:{...usbSaved(),...savedSpotify()}});await settle();
+  await h.run('startAlbumGlow()');f.drop();await h.run('usb.operations');
+  assert.equal(h.run('syncing'),true);assert.equal(h.run('lightsReady()'),false);
+  assert.match(h.element('syncStatus').textContent,/waiting for USB/);
+  await h.run('pickLights()');assert.equal(h.run('syncing'),true);assert.equal(h.run('lightsReady()'),true);
+  h.run('btDisconnect()');assert.equal(h.run('syncing'),false);
+});
+
+test('a USB replug refreshes granted ports instead of reopening a stale disconnected wrapper',async t=>{
+  const f=serialFixture();const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();await h.run('pickLights()');
+  f.drop();await h.run('usb.operations');assert.equal(h.run('grantedPorts.length'),0);
+  const replacement=serialFixture();f.serial.getPorts=async()=>[replacement.port];f.plug(replacement.port);await settle();
+  await h.run('pickLights()');
+  assert.equal(h.run('usb.session.port'),replacement.port);assert.equal(replacement.opens,1);
+  assert.equal(f.opens,1);assert.equal(f.choosers,0);
+});
+
+test('switching away from USB clears stale port state and uses the next controller protocol', async t=>{
+  const f=serialFixture();const h=harness(t,{serial:f.serial,saved:usbSaved()});await settle();await h.run('pickLights()');
+  await h.run('applyManualColor("#FF0000")');const count=f.writes.length;
+  h.run('changeController("sp630e")');await h.run('usb.operations');
+  assert.equal(f.closes,1);assert.equal(h.run('usb.session'),null);assert.equal(h.run('syncing'),false);
+  await h.connect();await h.run('applyManualColor("#00FF00")');
+  assert.equal(f.writes.length,count);assert.deepEqual(h.writes.at(-1),[0x53,0x52,0,1,0,4,0,255,0,255]);
+});
+
+test('switching profiles during a pending Bluetooth connect ignores its late success', async t=>{
+  const f=serialFixture();const h=harness(t,{serial:f.serial});let finish;
+  h.device.gatt.connect=function(){return new Promise(resolve=>{finish=()=>{this.connected=true;resolve(this);};});};
+  const old=h.run('pickLights()');await settle();h.run('changeController("sp803e")');finish();await old;
+  assert.equal(h.device.gatt.connected,false);assert.equal(h.run('char'),null);
+  await h.run('pickLights()');assert.equal(h.run('usb.session.ready'),true);assert.equal(h.writes.length,0);
+});
+
+const newAlbum=()=>({item:{name:'Controller test song',artists:[{name:'Test artist'}],album:{id:'controller-album',name:'Controller album',images:[{url:'https://i.scdn.co/image/test'}]}}});
+for(const model of ['sp630e','sp803e'])test('Spotify playback sends the vivid artwork color through '+model,async t=>{
+  const f=serialFixture();const h=harness(t,{serial:f.serial,saved:{...savedSpotify(),albumglow_controller:model},
+    fetch:async()=>({status:200,ok:true,headers:{get:()=>null},json:async()=>newAlbum()})});
+  await h.run('pickLights()');h.run('usb.writeGap=0;coverLoad=async()=>({});extractColor=()=>[232,40,56];syncing=true');
+  await h.run('checkSpotify()');assert.equal(h.run('currentAlbum'),'controller-album');
+  assert.equal(h.element('colorCode').textContent,'#E80000 target color');
+  if(model==='sp630e')assert.deepEqual(h.writes.at(-1),[0x53,0x52,0,1,0,4,232,0,0,255]);
+  else{assert.equal(h.run('char'),null);assert.deepEqual(JSON.parse(f.writes.at(-1)).seg[0].col[0],[232,0,0]);}
+});
+
+test('Spotify fetched for a USB session cannot send a late color to the next Bluetooth controller',async t=>{
+  const f=serialFixture();let finish;
+  const h=harness(t,{serial:f.serial,saved:{...savedSpotify(),...usbSaved()},fetch:()=>new Promise(resolve=>{finish=resolve;})});
+  await settle();await h.run('pickLights()');h.run('coverLoad=async()=>({});extractColor=()=>[232,40,56];syncing=true');
+  const poll=h.run('checkSpotify()');await settle();h.run('changeController("sp630e")');await h.connect();
+  finish({status:200,ok:true,headers:{get:()=>null},json:async()=>newAlbum()});await poll;
+  assert.equal(h.writes.length,0);assert.deepEqual(f.writes,['{"v":true}\n']);assert.equal(h.run('syncing'),false);
 });

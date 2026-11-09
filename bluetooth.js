@@ -115,13 +115,17 @@ class AlbumGlowBluetooth {
     this.onState('Disconnected by you');
   }
 
-  async useDevice(device) {
+  async useDevice(device, {endpoint = null} = {}) {
     this.disconnect();
     const cached = this.cachedEndpoint();
     const s = {device, generation: 0, attempts: 0, busy: false, ready: false,
       retryTimer: null, stableTimer: null, entries: [], characteristic: null, started: false,
       verified: cached?.deviceId === device.id, lease: null,
-      endpoint: cached?.deviceId === device.id ? cached : null};
+      endpoint: cached?.deviceId === device.id ? cached : null, requiredEndpoint: endpoint};
+    if (endpoint && (!endpoint.services.includes(s.endpoint?.service) || s.endpoint?.characteristic !== endpoint.characteristic)) {
+      s.endpoint = null;
+      s.verified = false;
+    }
     this.session = s;
     s.onDrop = () => {
       if (!this.active(s) || !s.started || device.gatt.connected) return;
@@ -216,6 +220,24 @@ class AlbumGlowBluetooth {
             try { this.storage?.removeItem(this.cacheKey); } catch { /* optional cache */ }
           }
         }
+        if (!entries.length && s.requiredEndpoint) {
+          // Model-specific evidence supplies these UUIDs. Do not select another
+          // arbitrary writable characteristic on a device chosen in this mode.
+          for (const id of s.requiredEndpoint.services) {
+            try {
+              const service = await stage('model service ' + id, () => server.getPrimaryService(id));
+              const c = await stage('model characteristic ' + s.requiredEndpoint.characteristic,
+                () => service.getCharacteristic(s.requiredEndpoint.characteristic));
+              if (!c.properties.write && !c.properties.writeWithoutResponse) throw new Error('The model characteristic is not writable');
+              entries.push({c, service: service.uuid});
+              break;
+            } catch (error) {
+              this.assertActive(s, generation);
+              if (error.name !== 'NotFoundError') throw error;
+            }
+          }
+          if (!entries.length) throw new Error('SP630E endpoint was not found. Check the chosen device and controller model.');
+        }
         if (!entries.length) {
           const services = await stage('service discovery', () => server.getPrimaryServices());
           for (const service of services) {
@@ -306,9 +328,16 @@ class AlbumGlowBluetooth {
     this.log('BT: visually confirmed endpoint remembered for this controller');
   }
 
-  write(frame, {kind = 'command', valid = () => true} = {}) {
+  write(frame, options) {
+    return this.writeBatch([frame], options);
+  }
+
+  writeBatch(frames, {kind = 'command', valid = () => true} = {}) {
     const s = this.session;
     if (!s?.ready || !s.device.gatt.connected) return Promise.reject(new Error('Bluetooth is not ready; wait for reconnection'));
+    if (!Array.isArray(frames) || !frames.length || frames.length > 4) return Promise.reject(new TypeError('Expected one to four command frames'));
+    const copies = frames.map(frame => new Uint8Array(frame));
+    if (copies.some(frame => !frame.length)) return Promise.reject(new TypeError('Command frames must not be empty'));
     return new Promise((resolve, reject) => {
       // Only the newest unsent color matters. Power commands remain ordered.
       if (kind === 'color') {
@@ -317,7 +346,7 @@ class AlbumGlowBluetooth {
       }
       if (this.pending.length >= 16) { reject(new Error('Bluetooth queue full; wait before sending more commands')); return; }
       this.pending.push({s, generation: s.generation, c: s.characteristic,
-        frame: new Uint8Array(frame), kind, valid, resolve, reject});
+        frames: copies, kind, valid, resolve, reject});
       void this.pump();
     });
   }
@@ -330,24 +359,26 @@ class AlbumGlowBluetooth {
         const command = this.pending.shift();
         try {
           await this.exclusive(async () => {
-            const {s, generation, c, frame} = command;
+            const {s, generation, c} = command;
             const check = () => {
               this.assertActive(s, generation);
               if (!s.ready || s.characteristic !== c || !command.valid()) throw this.cancelled();
             };
-            check();
-            const wait = this.writeGap - (this.now() - this.lastWriteAt);
-            if (wait > 0) await new Promise(resolve => this.timers.setTimeout(resolve, wait));
-            check();
-            const mode = c.properties.writeWithoutResponse && c.writeValueWithoutResponse ? 'writeValueWithoutResponse' :
-              c.properties.write && c.writeValueWithResponse ? 'writeValueWithResponse' : 'writeValue';
-            this.log('BT: write start (' + command.kind + ', ' + mode + ', ' + frame.length + ' bytes)');
-            try { await c[mode](frame); }
-            finally { this.lastWriteAt = this.now(); }
-            check();
+            for (const frame of command.frames) {
+              check();
+              const wait = this.writeGap - (this.now() - this.lastWriteAt);
+              if (wait > 0) await new Promise(resolve => this.timers.setTimeout(resolve, wait));
+              check();
+              const mode = c.properties.writeWithoutResponse && c.writeValueWithoutResponse ? 'writeValueWithoutResponse' :
+                c.properties.write && c.writeValueWithResponse ? 'writeValueWithResponse' : 'writeValue';
+              this.log('BT: write start (' + command.kind + ', ' + mode + ', ' + frame.length + ' bytes)');
+              try { await c[mode](frame); }
+              finally { this.lastWriteAt = this.now(); }
+              check();
+              this.log('BT: write complete (browser accepted; verify the LEDs visually)');
+            }
             s.lastSuccessful = c;
             s.lastKind = command.kind;
-            this.log('BT: write complete (browser accepted; verify the LEDs visually)');
           });
           command.resolve();
         } catch (error) {
