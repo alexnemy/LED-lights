@@ -152,12 +152,20 @@ test('HTTP 429 respects Retry-After, and overlapping playback polls stay suppres
   assert.ok(h.run('rateLimitUntil-Date.now()')>=7000);
   assert.match(h.element('syncStatus').textContent,/Waiting 7s/);
   let count=0;h.context.fetch=async()=>{count++;};await h.run('checkSpotify()');assert.equal(count,0);
+  h.run('rateLimitUntil=0');
+  h.context.fetch=async()=>({ok:true,status:204});
+  await h.run('checkSpotify()');
+  assert.equal(h.run('rateLimitCount'),0);
+  assert.equal(h.element('syncStatus').textContent,'Syncing · no active playback · checking every 2s');
+  h.context.fetch=async()=>({ok:true,status:200,json:async()=>({})});
+  await h.run('checkSpotify()');
+  assert.equal(h.element('syncStatus').textContent,'Syncing · no active track · checking every 2s');
 });
 
 test('disconnect clears page references but preserves automatic sync intent until user stops', async t=>{
   const h=harness(t);await h.connect();
   h.run('syncing=true');h.device.gatt.disconnect();
-  assert.equal(h.run('char'),null);assert.equal(h.run('writable.length'),0);
+  assert.equal(h.run('char'),null);assert.equal(h.element('characteristic').children.length,0);
   assert.equal(h.run('syncing'),true);assert.equal(h.element('testBtn').disabled,true);
   h.run('btDisconnect()');assert.equal(h.run('syncing'),false);
 });
@@ -352,7 +360,7 @@ test('manual mode ignores stale Spotify playback response and prevents LED overr
 test('manual mode cancels an already queued Spotify color', async t=>{
   const h=harness(t,{saved:savedSpotify()});await h.connect();h.run('syncing=true');
   let release;h.c.writeValueWithoutResponse=frame=>{h.writes.push([...frame]);return new Promise(resolve=>{release=resolve;});};
-  const first=h.run('sendFrame(new Uint8Array([1]))');await settle();
+  const first=h.run('bluetooth.write(new Uint8Array([1]))');await settle();
   const old=h.run('sendLedRgb(255,0,0,{valid:()=>syncing})');const cancelled=assert.rejects(old,{name:'AbortError'});
   const manual=h.run('applyManualColor("#00FF00")');release();await first;await cancelled;await settle();release();await manual;
   assert.deepEqual(h.writes,[[1],[0x78,0,255,0,0,0xf0,0xee]]);
@@ -429,8 +437,8 @@ test('a late saved-device preload preserves newer chooser grants and device obje
   await h.connect();assert.equal(h.chooserCalls.length,1);
   const olderWrapper={...h.device,gatt:{connected:false}};
   finish([olderWrapper,{id:'another-approved-device'}]);await settle();
-  assert.equal(h.run('grantedDevices.find(d=>d.id==="mock")'),h.device);
-  assert.equal(h.run('grantedDevices.length'),2);
+  assert.equal(h.run('grantedDevices.get("mock")'),h.device);
+  assert.equal(h.run('grantedDevices.size'),2);
   h.run('btDisconnect()');await h.connect();
   assert.equal(h.chooserCalls.length,1);assert.equal(h.device.gatt.connected,true);
 });
