@@ -73,7 +73,8 @@
       <button id="btBtn" class="primary" type="button">Connect Bluetooth</button>
       <button id="btDisconnectBtn" type="button">Disconnect lights</button>
       <div class="state" id="btStatus" role="status">Not connected</div>
-      <button id="ledPowerBtn" class="green" type="button" disabled>Turn LEDs off</button>
+      <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
+      <button id="ledPowerOffBtn" type="button" hidden disabled>Turn LEDs off</button>
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
@@ -175,12 +176,17 @@ let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManua
 const MANUAL_INPUT_INTERVAL=200;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
+let ledPowerKnown=false;
 let ledIsOn=true, lastLedRgb=null, lastLedDeviceId=null, ledPowerBusy=false, brightnessTimer=null, brightnessRequested=false;
 const POWER_FRAME=on=>new Uint8Array(on?[0xcc,0x23,0x33]:[0xcc,0x24,0x33]);
 function renderLedControls(){
- $('ledPowerBtn').disabled=ledPowerBusy||!device?.gatt?.connected||!char;
- $('ledPowerBtn').textContent=ledIsOn?'Turn LEDs off':'Turn LEDs on';
- $('ledPowerBtn').classList.toggle('green',ledIsOn);
+ const connected=Boolean(device?.gatt?.connected && char);
+ const turnOff=ledPowerKnown && ledIsOn;
+ $('ledPowerBtn').disabled=ledPowerBusy||!connected;
+ $('ledPowerBtn').textContent=turnOff?'Turn LEDs off':'Turn LEDs on';
+ $('ledPowerBtn').classList.toggle('green',turnOff);
+ $('ledPowerOffBtn').hidden=!connected||ledPowerKnown;
+ $('ledPowerOffBtn').disabled=$('ledPowerBtn').disabled;
  $('ledBrightness').value=String(ledBrightness);
  $('ledBrightnessValue').textContent=ledBrightness+'%';
 }
@@ -213,10 +219,12 @@ async function sendLedRgb(r,g,b,{kind='color',valid=()=>true}={}){
 async function setLedPower(on){
  if(ledPowerBusy)return;
  if(!device?.gatt?.connected||!char){err(Error('Connect Apollo Bluetooth first.'));return}
+ const session=bluetooth.session,generation=session.generation;
  ledPowerBusy=true;powerGeneration++;renderLedControls();
  try{
   await sendFrame(POWER_FRAME(on)); // Apollo-family power command; verify on your controller.
-  ledIsOn=on;
+  if(!bluetooth.active(session,generation))return;
+  ledIsOn=on;ledPowerKnown=true;
   $('ledControlsStatus').textContent=on?'Power ON bytes sent (unverified on this controller)':'Power OFF bytes sent (unverified on this controller)';
   log('LED power '+(on?'ON':'OFF')+' command sent');
   ledPowerBusy=false;
@@ -456,6 +464,9 @@ const bluetooth=new AlbumGlowBluetooth({
   }
  },
  onClear:()=>{
+  // Bluetooth cannot read power state. Offer both actions on the next connection.
+  ledPowerKnown=false;
+  $('ledControlsStatus').textContent='Connect Bluetooth to use power controls.';
   char=null;writable=[];currentAlbum='';syncGeneration++;cancelLiveColorInput();
   if(brightnessTimer!==null){clearTimeout(brightnessTimer);brightnessTimer=null}
   $('characteristic').replaceChildren();
@@ -465,6 +476,7 @@ const bluetooth=new AlbumGlowBluetooth({
  onUnconfirmed:()=>{$('confirmed').checked=false;stopSync({cancelPendingStartup:false})},
  onReady:({device:connected,entries,index})=>{
   device=connected;writable=entries;char=entries[index].c;
+  $('ledControlsStatus').textContent='';
   if(lastLedDeviceId!==connected.id||!lastLedRgb){lastLedRgb=rememberedLedColor(connected.id);lastLedDeviceId=connected.id;}
   syncGeneration++;currentAlbum='';
   const sel=$('characteristic');sel.replaceChildren();
@@ -760,7 +772,8 @@ $('confirmed').onchange=()=>{
 $('testBtn').onclick=()=>testColor(255,0,0);
 $('testGreen').onclick=()=>testColor(0,255,0);
 $('testBlue').onclick=()=>testColor(0,0,255);
-$('ledPowerBtn').onclick=()=>setLedPower(!ledIsOn);
+$('ledPowerBtn').onclick=()=>setLedPower(!(ledPowerKnown && ledIsOn));
+$('ledPowerOffBtn').onclick=()=>setLedPower(false);
 $('ledBrightness').oninput=e=>setLedBrightness(e.target.value);
 renderLedControls();
 $('checkBtn').onclick=checkSpotify;
