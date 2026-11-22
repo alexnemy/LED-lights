@@ -140,7 +140,7 @@
     <section class="panel">
       <h2>Lights</h2>
       <div class="light-controls">
-        <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
+        <button id="ledPowerBtn" type="button" disabled>Turn LEDs off</button>
         <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
         <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
         <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
@@ -233,16 +233,16 @@ let manualInputTimer=null,pendingManualInput=null,manualColorVersion=0,lastManua
 const MANUAL_INPUT_INTERVAL=200;
 // Brightness remains RGB scaling; power frames remain unverified on this controller.
 let ledBrightness=Math.max(0,Math.min(100,Number(localStorage.getItem('albumglow_brightness') ?? 100)||0));
-let ledPowerKnown=false;
+const ledPowerByDevice=new Map();
+const ledPowerStorageKey=deviceId=>'albumglow_power_v1:'+deviceId;
 let ledIsOn=true, lastLedRgb=null, lastLedDeviceId=null, ledPowerBusy=false, brightnessTimer=null, brightnessRequested=false;
 const POWER_FRAME=on=>new Uint8Array([0xcc,on?0x23:0x24,0x33]);
 function lightsReady(){return Boolean(device?.gatt?.connected && char)}
 function renderLedControls(){
  const connected=lightsReady();
- const turnOff=ledPowerKnown && ledIsOn;
  $('ledPowerBtn').disabled=ledPowerBusy||!connected;
- $('ledPowerBtn').textContent=turnOff?'Turn LEDs off':'Turn LEDs on';
- $('ledPowerBtn').classList.toggle('green',turnOff);
+ $('ledPowerBtn').textContent=ledIsOn?'Turn LEDs off':'Turn LEDs on';
+ $('ledPowerBtn').classList.toggle('green',ledIsOn);
  $('ledBrightness').value=String(ledBrightness);
  $('ledBrightnessValue').textContent=ledBrightness+'%';
 }
@@ -280,7 +280,11 @@ async function setLedPower(on){
  try{
   await bluetooth.write(POWER_FRAME(on)); // Apollo-family power command; verify on your controller.
   if(!bluetooth.active(session,generation))return;
-  ledIsOn=on;ledPowerKnown=true;
+  ledIsOn=on;
+  const deviceId=session.device.id;
+  ledPowerByDevice.set(deviceId,on);
+  try{localStorage.setItem(ledPowerStorageKey(deviceId),on?'on':'off')}
+  catch{log('Could not save the last LED power setting in this browser')}
   log('LED power '+(on?'ON':'OFF')+' command sent');
   ledPowerBusy=false;
   if(on && lastLedRgb){
@@ -532,8 +536,6 @@ const bluetooth=new AlbumGlowBluetooth({
   }
  },
  onClear:()=>{
-  // Bluetooth cannot read power state. Start with an On action on the next connection.
-  ledPowerKnown=false;
   $('ledControlsStatus').textContent='Connect Bluetooth to use power controls.';
   char=null;currentAlbum='';syncGeneration++;cancelLiveColorInput();
   clearTimeout(brightnessTimer);
@@ -545,6 +547,14 @@ const bluetooth=new AlbumGlowBluetooth({
  onUnconfirmed:()=>{$('confirmed').checked=false;stopSync({cancelPendingStartup:false})},
  onReady:({device:connected,entries,index})=>{
   device=connected;char=entries[index].c;
+  // The controller does not report its power state. Restore the last accepted command.
+  if(!ledPowerByDevice.has(connected.id)){
+   let saved;
+   try{saved=localStorage.getItem(ledPowerStorageKey(connected.id))}
+   catch{log('Could not read the last LED power setting in this browser')}
+   ledPowerByDevice.set(connected.id,saved!=='off');
+  }
+  ledIsOn=ledPowerByDevice.get(connected.id);
   $('ledControlsStatus').textContent='';
   if(lastLedDeviceId!==connected.id||!lastLedRgb){lastLedRgb=rememberedLedColor(connected.id);lastLedDeviceId=connected.id;}
   syncGeneration++;currentAlbum='';
@@ -888,7 +898,7 @@ $('confirmed').onchange=()=>{
 $('testBtn').onclick=()=>testColor(255,0,0);
 $('testGreen').onclick=()=>testColor(0,255,0);
 $('testBlue').onclick=()=>testColor(0,0,255);
-$('ledPowerBtn').onclick=()=>setLedPower(!(ledPowerKnown && ledIsOn));
+$('ledPowerBtn').onclick=()=>setLedPower(!ledIsOn);
 $('ledBrightness').oninput=e=>setLedBrightness(e.target.value);
 renderLedControls();
 $('displayCover').onload=()=>{$('displayCover').hidden=!displayArtwork};

@@ -62,29 +62,52 @@ test('RGB tests and brightness still use original color frame with RGB scaling',
   assert.equal(h.context.localStorage.getItem('albumglow_brightness'),'50');
 });
 
-test('one power button toggles after a successful write and offers On after reconnecting', async t=>{
+test('power defaults to on and restores the last successful command after reconnect and reload', async t=>{
+  const key='albumglow_power_v1:mock';
   const h=harness(t), power=h.element('ledPowerBtn');
   assert.equal(power.disabled,true);
   await h.connect();
   assert.equal(power.disabled,false);
-  assert.equal(power.textContent,'Turn LEDs on');
+  assert.equal(power.textContent,'Turn LEDs off');
   assert.deepEqual(h.writes,[]);
 
   await power.onclick();
-  assert.deepEqual(h.writes,[[0xcc,0x23,0x33]]);
-  assert.equal(power.textContent,'Turn LEDs off');
-  await power.onclick();
-  assert.deepEqual(h.writes,[[0xcc,0x23,0x33],[0xcc,0x24,0x33]]);
+  assert.deepEqual(h.writes,[[0xcc,0x24,0x33]]);
   assert.equal(power.textContent,'Turn LEDs on');
-
-  await power.onclick();
-  assert.equal(power.textContent,'Turn LEDs off');
+  assert.equal(h.context.localStorage.getItem(key),'off');
   h.device.gatt.disconnect();
   assert.equal(power.disabled,true);
   await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
   assert.equal(power.disabled,false);
   assert.equal(power.textContent,'Turn LEDs on');
-  assert.deepEqual(h.writes,[[0xcc,0x23,0x33],[0xcc,0x24,0x33],[0xcc,0x23,0x33]]);
+  assert.equal(h.writes.length,1);
+
+  const saved={[key]:h.context.localStorage.getItem(key)};
+  const reloaded=harness(t,{saved});
+  await reloaded.connect();
+  assert.equal(reloaded.element('ledPowerBtn').textContent,'Turn LEDs on');
+  await reloaded.run('sendLedRgb(255,0,0)');
+  assert.deepEqual(reloaded.writes,[]);
+  await reloaded.element('ledPowerBtn').onclick();
+  assert.deepEqual(reloaded.writes,[[0xcc,0x23,0x33],[0x78,255,0,0,0,0xf0,0xee]]);
+  assert.equal(reloaded.context.localStorage.getItem(key),'on');
+
+  const other=harness(t,{saved});
+  other.device.id='another-controller';
+  await other.connect();
+  assert.equal(other.element('ledPowerBtn').textContent,'Turn LEDs off');
+  assert.deepEqual(other.writes,[]);
+});
+
+test('a failed LED power write leaves the last saved power state intact', async t=>{
+  const key='albumglow_power_v1:mock';
+  const h=harness(t,{saved:{[key]:'off'}});
+  await h.connect();
+  h.run('bluetooth.write=async()=>{throw Error("write failed")}');
+  await h.element('ledPowerBtn').onclick();
+  assert.equal(h.context.localStorage.getItem(key),'off');
+  assert.equal(h.element('ledPowerBtn').textContent,'Turn LEDs on');
+  assert.match(h.element('alert').textContent,/write failed/);
 });
 
 test('power preserves original unverified bytes; colors stay suppressed while off and restore on power on', async t=>{
