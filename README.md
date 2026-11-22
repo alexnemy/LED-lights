@@ -25,7 +25,7 @@ Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn o
 
 ## Colors without Spotify
 
-1. Click **Connect Bluetooth**. Spotify sign-in and Client ID are not needed for manual lights.
+1. Open **Settings** and click **Connect Bluetooth**. Spotify sign-in and Client ID are not needed for manual lights.
 2. Select Red, Orange, Yellow, Green, Cyan, Blue, Purple, Pink, White, or Warm white to apply it immediately.
 3. Choose a custom color with the native color picker or type a hex value. Valid colors apply live; there is no Apply button. Three- and six-digit hex values are accepted, with or without `#`. The field keeps your text/caret while typing; blur or Enter formats the completed value.
 4. Use the main brightness slider and on/off button. Manual RGB values bypass vivid album processing and are scaled only by brightness. The last unscaled RGB command successfully accepted by the browser is saved for the selected controller, including Spotify/test colors. After reloading and reconnecting, brightness can reuse that color without selecting a preset again. The previous preview’s saved manual color is migrated for its remembered controller.
@@ -36,7 +36,7 @@ The last manual hex color is saved locally and shown after reloading. Picking a 
 
 ## Settings and optional checks
 
-The **Settings** button opens a keyboard-accessible dialog containing Spotify connection controls, a collapsible Spotify app setup section, and advanced Bluetooth options. Escape or Close dismisses it. The main page retains Bluetooth connection controls, brightness, power, presets, and the hex/color picker. Diagnostics are under **Connection log**. **Copy log** copies the whole current log (up to the retained 300 lines), even when its display is collapsed. A confirmation appears on success. If browser clipboard access is blocked, a selected text box lets you press Ctrl+C or use a normal Copy action; it does not send logs anywhere automatically.
+The **Settings** button opens a keyboard-accessible dialog containing Spotify and Bluetooth connection controls, a collapsible Spotify app setup section, advanced Bluetooth options, and the connection log. Escape or Close dismisses it. The main page keeps brightness, power, album artwork and sync controls, presets, and the hex/color picker. Diagnostics are under **Settings → Connection log**. **Copy log** copies the whole current log (up to the retained 300 lines), including lines outside the scroll area. A confirmation appears on success. If browser clipboard access is blocked, a selected text box lets you press Ctrl+C or use a normal Copy action; it does not send logs anywhere automatically.
 
 In **Advanced Bluetooth & optional color tests**, you can choose a different controller, enter a custom service, change the writable characteristic, run red/green/blue tests, and optionally remember the visually verified endpoint. That checkbox is only for verified endpoint caching, not permission to use Spotify sync. Initializer selection and browser write completion are not physical verification. Selecting another characteristic still stops sync so you can decide what to send next.
 

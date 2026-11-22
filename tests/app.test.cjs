@@ -156,10 +156,10 @@ test('HTTP 429 respects Retry-After, and overlapping playback polls stay suppres
   h.context.fetch=async()=>({ok:true,status:204});
   await h.run('checkSpotify()');
   assert.equal(h.run('rateLimitCount'),0);
-  assert.equal(h.element('syncStatus').textContent,'Syncing · no active playback · checking every 2s');
+  assert.equal(h.element('syncStatus').textContent,'No active Spotify playback');
   h.context.fetch=async()=>({ok:true,status:200,json:async()=>({})});
   await h.run('checkSpotify()');
-  assert.equal(h.element('syncStatus').textContent,'Syncing · no active track · checking every 2s');
+  assert.equal(h.element('syncStatus').textContent,'No active Spotify track');
 });
 
 test('disconnect clears page references but preserves automatic sync intent until user stops', async t=>{
@@ -756,4 +756,27 @@ test('Spotify checks on a two-second interval even with an older saved interval'
   t.mock.timers.tick(1);
   await settle();
   assert.equal(h.requests.length,2);
+});
+
+test('Bluetooth controls in Settings can connect and disconnect without Spotify', async t=>{
+  const h=harness(t);
+  h.element('settingsBtn').onclick();
+  await h.element('btBtn').onclick();
+  assert.equal(h.device.gatt.connected,true);
+  assert.equal(h.element('ledPowerBtn').disabled,false);
+  assert.equal(h.redirects.length,0);
+  h.element('btDisconnectBtn').onclick();
+  assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.element('ledPowerBtn').disabled,true);
+  assert.equal(h.element('settingsDialog').open,true);
+});
+
+test('Bluetooth setup errors are visible inside Settings', async t=>{
+  const h=harness(t);
+  h.context.navigator.bluetooth.requestDevice=async()=>{throw new Error('Bluetooth unavailable');};
+  h.element('settingsBtn').onclick();
+  await h.element('btBtn').onclick();
+  assert.match(h.element('settingsAlert').textContent,/Bluetooth unavailable/);
+  assert.match(h.element('log').textContent,/Bluetooth unavailable/);
+  assert.equal(h.element('alert').textContent,'');
 });
