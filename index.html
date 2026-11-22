@@ -272,13 +272,13 @@ async function sendLedRgb(r,g,b,{kind='color',valid=()=>true}={}){
   catch{log('Could not save the last LED color in this browser')}
  }
 }
-async function setLedPower(on){
+async function setLedPower(on,{valid=()=>true}={}){
  if(ledPowerBusy)return;
  if(!lightsReady()){err(Error('Connect Apollo Bluetooth first.'));return}
  const session=bluetooth.session,generation=session.generation;
  ledPowerBusy=true;powerGeneration++;renderLedControls();
  try{
-  await bluetooth.write(POWER_FRAME(on)); // Apollo-family power command; verify on your controller.
+  await bluetooth.write(POWER_FRAME(on),{valid}); // Apollo-family power command; verify on your controller.
   if(!bluetooth.active(session,generation))return;
   ledIsOn=on;
   const deviceId=session.device.id;
@@ -291,7 +291,8 @@ async function setLedPower(on){
    await sendLedRgb(...lastLedRgb);
    if(manualRequested)$('manualStatus').textContent=manualColor+' sent · brightness '+ledBrightness+'%';
   }
- }catch(e){err(e)}finally{ledPowerBusy=false;renderLedControls()}
+  return true;
+ }catch(e){err(e);return false}finally{ledPowerBusy=false;renderLedControls()}
 }
 function setLedBrightness(value){
  brightnessRequested=true;
@@ -379,8 +380,22 @@ function cancelStartup(message='Startup cancelled. Your lights can be used manua
  renderStartup();
 }
 function completeStartup(){
- if(!startupRequest || startupRequest.deviceId!==device?.id || !char)return;
- startupRequest=null;renderStartup();startSync();
+ const request=startupRequest;
+ if(!request || request.deviceId!==device?.id || !lightsReady())return;
+ request.completion??=(async()=>{
+  $('startupStatus').textContent='Turning on your lights…';
+  const poweredOn=await setLedPower(true,{valid:()=>startupRequest===request});
+  if(startupRequest!==request)return;
+  if(!poweredOn){
+   cancelStartup('Could not turn on the lights. Click Start Album Glow to retry.');
+   return;
+  }
+  startupRequest=null;
+  renderStartup();
+  $('startupStatus').textContent='';
+  startSync();
+ })();
+ return request.completion;
 }
 async function startAlbumGlow(){
  if(startupRequest || spotifyLoginPending || $('btBtn').disabled)return;
@@ -395,9 +410,10 @@ async function startAlbumGlow(){
  }
  const request={deviceId:null};startupRequest=request;renderStartup();
  $('startupStatus').textContent='Connecting your lights…';
- if(lightsReady()){request.deviceId=device.id;completeStartup();return}
+ if(lightsReady()){request.deviceId=device.id;return completeStartup()}
  await pickBluetooth({startup:request});
  if(startupRequest===request && !bluetooth.session)cancelStartup('No lights selected. Click Start Album Glow when you are ready.');
+ return request.completion;
 }
 function normalizeHex(value){
  let h=String(value).trim().replace(/^#/,'');
@@ -531,7 +547,7 @@ const bluetooth=new AlbumGlowBluetooth({
  onState:message=>{
   status('bt',message);
   if(startupRequest){
-   $('startupStatus').textContent=message;
+   if(!startupRequest.completion)$('startupStatus').textContent=message;
    if(message.startsWith('Automatic retries stopped')){startupRequest=null;renderStartup()}
   }
  },
@@ -613,7 +629,7 @@ async function pickBluetooth({startup=null,forceChooser=false}={}){
   // while the chooser was open. Selecting it again must not drop that link.
   if(device?.id===picked.id && lightsReady() && bluetooth.session?.ready){
    log('BT: selected lights are already ready; keeping the existing connection');
-   if(startupRequest===startup)completeStartup();
+   if(startupRequest===startup)await completeStartup();
    return true;
   }
   stopSync({cancelPendingStartup:false});$('confirmed').checked=false;

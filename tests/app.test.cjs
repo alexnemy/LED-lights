@@ -239,6 +239,35 @@ test('one-click startup reconnects previously permitted lights and starts sync w
   await new Promise(resolve=>setTimeout(resolve,10));assert.equal(h.requests.length,1);
 });
 
+test('Start Album Glow turns remembered-off lights on before Spotify checks playback', async t=>{
+  const h=harness(t,{saved:{...savedSpotify(),'albumglow_power_v1:mock':'off'}});
+  let finishPower;
+  h.c.writeValueWithoutResponse=frame=>{
+    h.writes.push([...frame]);
+    return new Promise(resolve=>{finishPower=resolve;});
+  };
+  const startup=h.element('startupBtn').onclick();
+  await settle();
+  assert.deepEqual(h.writes,[[0xcc,0x23,0x33]]);
+  assert.equal(h.run('syncing'),false);
+  assert.equal(h.requests.length,0);
+  finishPower();
+  await startup;
+  assert.equal(h.run('syncing'),true);
+  assert.equal(h.element('ledPowerBtn').textContent,'Turn LEDs off');
+  assert.equal(h.context.localStorage.getItem('albumglow_power_v1:mock'),'on');
+});
+
+test('a failed startup power command keeps sync stopped and leaves Start available', async t=>{
+  const h=harness(t,{saved:savedSpotify()});
+  h.c.writeValueWithoutResponse=async()=>{throw Error('power write failed');};
+  await h.element('startupBtn').onclick();
+  assert.equal(h.run('syncing'),false);
+  assert.equal(h.element('startupBtn').disabled,false);
+  assert.match(h.element('startupStatus').textContent,/Click Start Album Glow to retry/);
+  assert.match(h.element('alert').textContent,/power write failed/);
+});
+
 test('startup uses the chooser immediately when saved-device support is absent', async t=>{
   const h=harness(t,{saved:savedSpotify()});
   const startup=h.run('startAlbumGlow()');
@@ -307,6 +336,7 @@ test('startup resumes after an automatic connection retry, without a second clic
   await h.run('startAlbumGlow()');assert.equal(h.run('syncing'),false);
   assert.equal(h.element('startupBtn').disabled,true);
   await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  await h.run('startupRequest?.completion');
   assert.equal(h.run('syncing'),true);assert.equal(h.element('startupBtn').disabled,false);
   assert.equal(h.chooserCalls.length,1);
 });

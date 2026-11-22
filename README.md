@@ -15,7 +15,7 @@ Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. I
 
 ## Daily use
 
-**Start Album Glow** connects Bluetooth and starts Spotify sync using your saved settings. There is no mandatory color test or checkbox. Your existing Client ID, Spotify tokens, brightness, and previously chosen vivid mode retain their original browser-storage keys.
+**Start Album Glow** connects Bluetooth, sends the LED On command, and starts Spotify sync using your saved settings. There is no mandatory color test or checkbox. Your existing Client ID, Spotify tokens, brightness, and previously chosen vivid mode retain their original browser-storage keys.
 
 On Chrome versions that support previously granted device access, the app loads the saved controller permission and reuses it on your click. Otherwise Chrome opens its chooser directly from that click. Revoked permission, a different browser/profile, or first use can require the chooser again. Nothing silently opens a permission prompt.
 
