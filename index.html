@@ -46,21 +46,25 @@
     #nowPlayingView{position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:clamp(20px,5vmin,56px);border:0;border-radius:0;background:#111318}
     #nowPlayingView[open]{display:grid;grid-template-rows:auto 1fr;gap:clamp(12px,3vmin,32px)}
     .display-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
-    .display-header h2{margin:0;font-size:clamp(18px,3vmin,30px)}
+    #nowPlayingBtn,.display-header{opacity:0;pointer-events:none;transition:opacity .18s ease}
+    #nowPlayingBtn[data-pointer-active],#nowPlayingBtn:focus-visible,
+    #nowPlayingView[data-pointer-active] .display-header,.display-header:has(button:focus-visible){opacity:1;pointer-events:auto}
+    @media(prefers-reduced-motion:reduce){#nowPlayingBtn,.display-header{transition:none}}
+    .display-header h2{margin:0;font-size:clamp(20px,3.3vmin,32px)}
     .display-header button{margin:0}
-    .display-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:center;gap:clamp(18px,5vmin,56px);width:min(100%,1240px);margin:auto}
-    .display-art{display:grid;place-items:center;width:min(100%,66vh);aspect-ratio:1;overflow:hidden;justify-self:center;background:#242936;color:#aab3c5;border-radius:12px;font-size:clamp(54px,16vmin,150px)}
+    .display-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:center;gap:clamp(18px,5vmin,56px);width:min(100%,1340px);margin:auto}
+    .display-art{display:grid;place-items:center;width:min(100%,72vh);aspect-ratio:1;overflow:hidden;justify-self:center;background:#242936;color:#aab3c5;border-radius:12px;font-size:clamp(60px,18vmin,164px)}
     .display-art > *{grid-area:1/1}
     #displayCover{width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;background:#111318}
-    #displayState{color:#b6d0ff;font-size:clamp(16px,3vmin,28px);font-weight:650;margin:0 0 8px}
-    #displayTitle{font-size:clamp(26px,6vmin,78px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
-    #displayArtist{font-size:clamp(17px,3.6vmin,42px);overflow-wrap:anywhere}
+    #displayState{color:#b6d0ff;font-size:clamp(18px,3.3vmin,31px);font-weight:650;margin:0 0 8px}
+    #displayTitle{font-size:clamp(30px,6.6vmin,86px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
+    #displayArtist{font-size:clamp(19px,4vmin,46px);overflow-wrap:anywhere}
     #displaySpotify{display:inline-block;margin-top:12px}
     #displaySpotify img{display:block;width:84px;height:auto}
     #displaySpotify[hidden]{display:none}
     @media(orientation:portrait){
       .display-content{grid-template-columns:1fr;text-align:center}
-      .display-art{width:min(74vw,45vh)}
+      .display-art{width:min(80vw,49vh)}
     }
   </style>
 </head>
@@ -148,7 +152,7 @@
       <h2 id="displayHeading">Now Playing</h2>
       <button id="closeNowPlayingBtn" type="button">Back to Album Glow</button>
     </header>
-    <div class="display-content">
+    <div class="display-content" tabindex="-1" autofocus>
       <div class="display-art">
         <span aria-hidden="true">♫</span>
         <img id="displayCover" alt="Album cover" hidden>
@@ -208,7 +212,7 @@ const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, syncTimer=null, syncing=false, polling=false, currentAlbum='', originalAlbumColor=null, spotifyToken=null;
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, spotifyLoginPending=false;
-let displayArtwork='';
+let displayArtwork='', nowPlayingControlsTimer;
 const grantedDevices=new Map();
 const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
 let manualColor=previousManualColor||'#FF0000', manualRequested=false;
@@ -870,6 +874,16 @@ renderLedControls();
 $('checkBtn').onclick=checkSpotify;
 $('displayCover').onload=()=>{$('displayCover').hidden=!displayArtwork};
 $('displayCover').onerror=()=>{$('displayCover').hidden=true};
+function showNowPlayingControls(){
+ const controls=[$('nowPlayingBtn'),$('nowPlayingView')];
+ for(const control of controls)control.setAttribute('data-pointer-active','');
+ clearTimeout(nowPlayingControlsTimer);
+ nowPlayingControlsTimer=setTimeout(()=>{
+  for(const control of controls)control.removeAttribute('data-pointer-active');
+ },2500);
+}
+document.addEventListener('pointermove',showNowPlayingControls);
+document.addEventListener('pointerdown',showNowPlayingControls); // A tap reveals the same controls on touch screens.
 $('nowPlayingBtn').onclick=()=>{
  if(!spotifyToken)renderNowPlaying();
  $('nowPlayingView').showModal();
