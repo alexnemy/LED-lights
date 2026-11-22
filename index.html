@@ -85,12 +85,16 @@
     @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
     #displayTitle{font-size:clamp(35.2px,7.7vmin,100.1px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
     #displayArtist{font-size:var(--display-artist-size);overflow-wrap:anywhere}
+    #displayTiming{width:min(100%,520px);margin:12px 0 0}
+    #displayProgress{display:block;width:100%;height:8px;accent-color:#b6d0ff}
+    .display-times{display:flex;justify-content:space-between;gap:12px;margin-top:6px;color:#b8c4d8;font-size:clamp(14px,2.35vmin,26px);font-variant-numeric:tabular-nums}
     .spotify-attribution{display:inline-block;margin-top:12px}
     .spotify-attribution img{display:block;width:84px;height:auto}
     #displaySpotify img{width:auto;height:calc(var(--display-artist-size) * .85);max-width:100%;object-fit:contain}
     .spotify-attribution[hidden]{display:none}
     @media(orientation:portrait){
       .display-content{grid-template-columns:1fr;text-align:center}
+      #displayTiming{margin-inline:auto}
       .display-art{width:min(91.3vw,56.1vh)}
     }
   </style>
@@ -160,10 +164,16 @@
         <span aria-hidden="true">♫</span>
         <img id="displayCover" alt="Album cover" hidden>
       </div>
-      <div aria-live="polite">
-        <p id="displayState"><span id="playingBars" class="playing-bars" aria-hidden="true" hidden><span></span><span></span><span></span></span><span id="displayStateLabel">Waiting for Spotify</span></p>
-        <h3 id="displayTitle">Connect Spotify</h3>
-        <p id="displayArtist">Return to Album Glow to sign in.</p>
+      <div>
+        <div aria-live="polite">
+          <p id="displayState"><span id="playingBars" class="playing-bars" aria-hidden="true" hidden><span></span><span></span><span></span></span><span id="displayStateLabel">Waiting for Spotify</span></p>
+          <h3 id="displayTitle">Connect Spotify</h3>
+          <p id="displayArtist">Return to Album Glow to sign in.</p>
+        </div>
+        <div id="displayTiming" hidden>
+          <progress id="displayProgress" aria-label="Song progress" value="0" max="1"></progress>
+          <div class="display-times"><span id="displayElapsed"></span><span id="displayDuration"></span></div>
+        </div>
         <a id="displaySpotify" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
       </div>
     </div>
@@ -227,6 +237,7 @@ let device=null, char=null, syncTimer=null, syncing=false, polling=false, curren
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, spotifyLoginPending=false;
 let displayArtwork='', nowPlayingControlsTimer;
+let playbackTiming=null, progressTimer=null;
 const grantedDevices=new Map();
 const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
 let manualColor=previousManualColor||'#FF0000', manualRequested=false;
@@ -743,8 +754,47 @@ function extractColor(img){
 function isSpotifyArtwork(url){
  return /^https:\/\/(?:i\.scdn\.co|p\.scdn\.co|[a-z0-9.-]+\.spotifycdn\.com)\//i.test(url);
 }
+function formatPlaybackTime(ms){
+ const seconds=Math.floor(ms/1000);
+ const minutes=Math.floor(seconds/60);
+ const remainder=String(seconds%60).padStart(2,'0');
+ return minutes+':'+remainder;
+}
+function stopProgressTimer(){
+ clearTimeout(progressTimer);
+ progressTimer=null;
+}
+function renderPlaybackProgress(){
+ const view=$('nowPlayingView'), timing=$('displayTiming');
+ timing.hidden=!playbackTiming;
+ if(!view.open || !playbackTiming){
+  stopProgressTimer();
+  return;
+ }
+ const {position,duration,observedAt,playing}=playbackTiming;
+ const elapsed=Math.min(duration,position+(playing?Math.max(0,performance.now()-observedAt):0));
+ const progress=$('displayProgress');
+ progress.max=duration;
+ progress.value=elapsed;
+ const elapsedText=formatPlaybackTime(elapsed), durationText=formatPlaybackTime(duration);
+ $('displayElapsed').textContent=elapsedText;
+ $('displayDuration').textContent=durationText;
+ progress.setAttribute('aria-valuetext',elapsedText+' of '+durationText);
+ if(!playing || elapsed>=duration){
+  stopProgressTimer();
+ }else if(progressTimer===null){
+  progressTimer=setTimeout(()=>{
+   progressTimer=null;
+   renderPlaybackProgress();
+  },1000);
+ }
+}
 function renderNowPlaying(payload,problem){
  const track=payload?.item;
+ const position=payload?.progress_ms, duration=track?.duration_ms;
+ const validTiming=Number.isFinite(position) && position>=0 && Number.isFinite(duration) && duration>0;
+ playbackTiming=validTiming?{position,duration,observedAt:performance.now(),playing:payload.is_playing===true}:null;
+ renderPlaybackProgress();
  const waitingTitle=problem?'Spotify unavailable':spotifyToken?'Play something on Spotify':'Connect Spotify';
  const title=track?(track.name||'Unknown track'):waitingTitle;
  const artist=track
@@ -932,10 +982,12 @@ document.addEventListener('pointerdown',showNowPlayingControls); // A tap reveal
 $('nowPlayingBtn').onclick=()=>{
  if(!spotifyToken)renderNowPlaying();
  $('nowPlayingView').showModal();
+ renderPlaybackProgress();
  scheduleNextPoll(0);
 };
 $('closeNowPlayingBtn').onclick=()=>$('nowPlayingView').close();
 $('nowPlayingView').onclose=()=>{
+ stopProgressTimer();
  clearTimeout(nowPlayingControlsTimer);
  $('nowPlayingView').removeAttribute('data-pointer-active');
  if(!shouldPollSpotify())scheduleNextPoll(0);

@@ -25,7 +25,7 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
     gatt:{connected:false,async connect(){this.connected=true;return this;},disconnect(){this.connected=false;for(const f of listeners)f();},
       async getPrimaryServices(){return [{uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristics(){return [c];}}];},
       async getPrimaryService(){return {uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristic(){return c;}};}}};
-  const sandbox={console,DOMException,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
+  const sandbox={console,DOMException,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,performance:{now:()=>Date.now()},crypto:globalThis.crypto,
     btoa:s=>Buffer.from(s,'binary').toString('base64'),setTimeout,clearTimeout,
     addEventListener:(type,listener)=>listen(windowEvents,type,listener),
     document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener:(type,listener)=>listen(documentEvents,type,listener),hidden:false},
@@ -834,4 +834,69 @@ test('Bluetooth setup errors are visible inside Settings', async t=>{
   assert.match(h.element('settingsAlert').textContent,/Bluetooth unavailable/);
   assert.match(h.element('log').textContent,/Bluetooth unavailable/);
   assert.equal(h.element('alert').textContent,'');
+});
+
+
+test('Now Playing advances locally, corrects seeks and skips, and freezes on pause', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const h=harness(t,{saved:savedSpotify()});
+  const track={id:'first',name:'First song',duration_ms:125000};
+  let playback={item:track,progress_ms:42000,is_playing:true};
+  let checks=0;
+  h.context.fetch=async()=>{checks++;return {ok:true,status:200,json:async()=>playback};};
+  const bar=h.element('displayProgress'), timing=h.element('displayTiming');
+  h.element('nowPlayingBtn').onclick();
+  t.mock.timers.tick(0);
+  await settle();
+  assert.equal(h.device.gatt.connected,false);
+  assert.equal(timing.hidden,false);
+  assert.equal(bar.value,42000);
+  assert.equal(h.element('displayElapsed').textContent,'0:42');
+  assert.equal(h.element('displayDuration').textContent,'2:05');
+
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(bar.value,43000);
+  assert.equal(checks,1);
+  assert.deepEqual(h.writes,[]);
+
+  playback={item:track,progress_ms:7000,is_playing:false};
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(checks,2);
+  assert.equal(bar.value,7000);
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(checks,2);
+  assert.equal(bar.value,7000);
+
+  playback={item:track,progress_ms:9000,is_playing:true};
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(bar.value,9000);
+  t.mock.timers.tick(1000);
+  assert.equal(bar.value,10000);
+
+  playback={item:{id:'second',name:'Second song',duration_ms:3000},progress_ms:2700,is_playing:true};
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(h.element('displayTitle').textContent,'Second song');
+  assert.equal(bar.max,3000);
+  assert.equal(bar.value,2700);
+  t.mock.timers.tick(1000);
+  assert.equal(bar.value,3000);
+  assert.equal(h.run('progressTimer'),null);
+
+  playback={item:track,progress_ms:null,is_playing:true};
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(timing.hidden,true);
+
+  playback={item:track,progress_ms:1000,is_playing:true};
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.notEqual(h.run('progressTimer'),null);
+  h.element('closeNowPlayingBtn').onclick();
+  assert.equal(h.run('progressTimer'),null);
+  assert.equal(h.run('syncTimer'),null);
 });
