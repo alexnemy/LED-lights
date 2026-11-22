@@ -12,7 +12,7 @@
     main{max-width:880px;margin:auto}h1{font-size:clamp(27px,4vw,38px);margin:0 0 6px}
     h2{font-size:17px;margin:0 0 15px}p{color:#babec8;margin:8px 0}
     a{color:#a6c9ff}code{background:#232631;padding:3px 5px;border-radius:4px}
-    .sub{margin-bottom:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .sub{margin-bottom:22px}.grid{--control-gap:18px;display:grid;grid-template-columns:1fr 1fr;column-gap:16px}
     .panel{background:#1b1e26;border:1px solid #333745;border-radius:16px;padding:20px;margin-bottom:16px}
     .wide{grid-column:1/-1}label{display:block;color:#ddd;font-size:14px;margin:12px 0 6px}
     input,select{width:100%;background:#111318;color:#fff;border:1px solid #525662;border-radius:9px;padding:11px 12px;font-size:14px}
@@ -30,16 +30,20 @@
     .heading-actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
     .heading h1{margin:0}.heading button{margin:0;flex-shrink:0}
     #startupBtn{font-size:18px;padding:13px 22px}#startupStatus{margin-bottom:0}
-    .preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
+    .preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
     .redirect-controls{display:flex;align-items:center;gap:8px}.redirect-controls input{min-width:0}.redirect-controls button{margin:0}
     .preset{display:flex;align-items:center;justify-content:center;gap:7px;margin:0;padding:10px 6px;min-width:0}
     .preset-dot{width:16px;height:16px;border-radius:50%;background:var(--preset);border:1px solid #ffffff55;flex-shrink:0}
     .preset[aria-pressed="true"]{border-color:#a6c9ff;background:#354862}
-    .grid > .panel{display:flex;flex-direction:column}
-    .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:auto}
+    .grid > .panel{display:grid;grid-row:span 4;grid-template-rows:subgrid;row-gap:0}
+    .grid > .panel h2{margin:0 0 var(--control-gap)}
+    .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:var(--control-gap)}
     .color-controls input{display:block}
-    .light-color{margin:10px 0}
-    #nowPlayingBtn{align-self:flex-start;margin:auto 0 0}
+    .light-controls{display:flex;flex-direction:column}
+    #ledPowerBtn{margin:0}
+    .light-color{display:flex;align-items:center;gap:6px;margin-top:auto;padding-top:10px}
+    .light-color .swatch{margin:0}
+    #nowPlayingBtn{justify-self:start;align-self:end;margin:var(--control-gap) 0 0}
     input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
     .hex-control{flex:1;min-width:140px}
     .now>div{min-width:0;overflow-wrap:anywhere}.cover{flex-shrink:0}
@@ -127,19 +131,21 @@
         <button class="preset" type="button" data-color="#FF1493" aria-pressed="false"><span class="preset-dot" style="--preset:#FF1493" aria-hidden="true"></span>Pink</button>
         <button class="preset" type="button" data-color="#FFFFFF" aria-pressed="false"><span class="preset-dot" style="--preset:#FFFFFF" aria-hidden="true"></span>White</button>
       </div>
-      <div class="state" id="manualStatus" role="status"></div>
       <div class="color-controls">
         <input id="manualPicker" type="color" value="#ff0000" aria-label="Color picker">
         <div class="hex-control"><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Hex color" aria-describedby="manualStatus"></div>
       </div>
+      <div class="state" id="manualStatus" role="status"></div>
     </section>
     <section class="panel">
       <h2>Lights</h2>
-      <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
-      <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
-      <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
-      <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
-      <div class="light-color"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
+      <div class="light-controls">
+        <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
+        <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
+        <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
+        <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
+        <div class="light-color"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
+      </div>
       <button id="nowPlayingBtn" type="button" aria-haspopup="dialog">Open Now Playing</button>
     </section>
   </div>
