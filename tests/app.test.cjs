@@ -667,7 +667,8 @@ test('Now Playing polls without Bluetooth and renders skips, pauses, and missing
   assert.equal(h.device.gatt.connected,false);
   assert.equal(h.element('displayTitle').textContent,'First song');
   assert.equal(h.element('displayArtist').textContent,'The Artist');
-  assert.equal(h.element('displayState').textContent,'Playing');
+  assert.equal(h.element('displayStateLabel').textContent,'Playing');
+  assert.equal(h.element('playingBars').hidden,false);
   assert.equal(h.element('displayCover').src,art);
   h.element('displayCover').onload();
   assert.equal(h.element('displayCover').hidden,false);
@@ -676,7 +677,8 @@ test('Now Playing polls without Bluetooth and renders skips, pauses, and missing
   payload={item:{...song,name:'Second song'},is_playing:false};
   await h.run('checkSpotify()');
   assert.equal(h.element('displayTitle').textContent,'Second song');
-  assert.equal(h.element('displayState').textContent,'Paused');
+  assert.equal(h.element('displayStateLabel').textContent,'Paused');
+  assert.equal(h.element('playingBars').hidden,true);
   payload={item:{...song,album:{id:'no-cover',images:[]}},is_playing:true};
   await h.run('checkSpotify()');
   assert.equal(h.element('displayCover').src,undefined);
@@ -711,7 +713,8 @@ test('Now Playing shares the LED poll and keeps checking after Bluetooth disconn
   assert.equal(h.writes.length,1);
   h.context.fetch=async()=>({ok:false,status:401});
   await h.run('checkSpotify()');
-  assert.equal(h.element('displayState').textContent,'Waiting for Spotify');
+  assert.equal(h.element('displayStateLabel').textContent,'Waiting for Spotify');
+  assert.equal(h.element('playingBars').hidden,true);
   assert.match(h.element('displayArtist').textContent,/reconnect Spotify/);
   h.run('spotifyLogout()');
   assert.equal(h.element('displayTitle').textContent,'Connect Spotify');

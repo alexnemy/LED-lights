@@ -57,6 +57,14 @@
     .display-art > *{grid-area:1/1}
     #displayCover{width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;background:#111318}
     #displayState{color:#b6d0ff;font-size:clamp(18px,3.3vmin,31px);font-weight:650;margin:0 0 8px}
+    .playing-bars{display:inline-flex;gap:.09em;align-items:end;height:.78em;margin-inline-end:.32em}
+    .playing-bars[hidden]{display:none}
+    .playing-bars span{width:.10em;height:100%;border-radius:1em;background:currentColor;transform-origin:bottom;transform:scaleY(var(--rest));animation:playing-bar .9s ease-in-out infinite alternate}
+    .playing-bars span:nth-child(1){--rest:.45;animation-delay:-.5s}
+    .playing-bars span:nth-child(2){--rest:.85;animation-delay:-.1s}
+    .playing-bars span:nth-child(3){--rest:.6;animation-delay:-.7s}
+    @keyframes playing-bar{from{transform:scaleY(.28)}to{transform:scaleY(1)}}
+    @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
     #displayTitle{font-size:clamp(30px,6.6vmin,86px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
     #displayArtist{font-size:clamp(19px,4vmin,46px);overflow-wrap:anywhere}
     #displaySpotify{display:inline-block;margin-top:12px}
@@ -158,7 +166,7 @@
         <img id="displayCover" alt="Album cover" hidden>
       </div>
       <div aria-live="polite">
-        <p id="displayState">Waiting for Spotify</p>
+        <p id="displayState"><span id="playingBars" class="playing-bars" aria-hidden="true" hidden><span></span><span></span><span></span></span><span id="displayStateLabel">Waiting for Spotify</span></p>
         <h3 id="displayTitle">Connect Spotify</h3>
         <p id="displayArtist">Return to Album Glow to sign in.</p>
         <a id="displaySpotify" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
@@ -708,9 +716,10 @@ function renderNowPlaying(payload,problem){
   ? (track.artists||[]).map(a=>a.name).filter(Boolean).join(', ') || 'Unknown artist'
   : problem || (spotifyToken?'Start a song on your iPhone.':'Return to Album Glow to sign in.');
  const state=track?(payload.is_playing===false?'Paused':'Playing'):'Waiting for Spotify';
- for(const [id,value] of [['displayTitle',title],['displayArtist',artist],['displayState',state]]){
+ for(const [id,value] of [['displayTitle',title],['displayArtist',artist],['displayStateLabel',state]]){
   if($(id).textContent!==value)$(id).textContent=value;
  }
+ $('playingBars').hidden=state!=='Playing';
  const image=$('displayCover');
  const art=(track?.album?.images||[]).find(a=>isSpotifyArtwork(a?.url))?.url || '';
  if(art!==displayArtwork){
