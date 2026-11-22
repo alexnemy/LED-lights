@@ -89,7 +89,7 @@
     #displayTiming[hidden]{display:none}
     #displayElapsed{text-align:right}
     #displayDuration{text-align:left}
-    #displayProgress{appearance:none;display:block;width:100%;height:5px;border:0;border-radius:999px;overflow:hidden;background:#343b49;color:#b6d0ff}
+    #displayProgress{appearance:none;display:block;width:100%;height:7px;border:0;border-radius:999px;overflow:hidden;background:#343b49;color:#b6d0ff}
     #displayProgress::-webkit-progress-bar{background:#343b49;border-radius:999px}
     #displayProgress::-webkit-progress-value{background:#b6d0ff;border-radius:999px}
     #displayProgress::-moz-progress-bar{background:#b6d0ff;border-radius:999px}
@@ -452,6 +452,7 @@ function cancelLiveColorInput(){
 }
 function setManualIntent(selected,options){
  stopSync({cancelColorInput:false});manualColor=selected;manualRequested=true;
+ tintNowPlaying(rgbFromHex(selected));
  showManualColor(selected,options);localStorage.setItem('albumglow_manual_color',selected);
  $('alert').textContent='';
  $('startupStatus').textContent='Manual color mode. Use Start Album Glow to sync with Spotify again.';
@@ -721,10 +722,16 @@ function vividColor(rgb){
  else parts=[chroma,0,x];
  return parts.map(v=>Math.max(0,Math.min(255,Math.round((v+m)*255))));
 }
+function tintNowPlaying(rgb){
+ const neutral=[17,19,24];
+ const muted=rgb.map((channel,i)=>Math.round(neutral[i]*0.84+channel*0.16));
+ $('nowPlayingView').style.backgroundColor=hex(muted);
+}
 function updateColorDisplay(raw){
  const ledColor=vividColor(raw);
  const ledHex=hex(ledColor);
  $('swatch').style.backgroundColor=ledHex;
+ tintNowPlaying(ledColor);
  $('colorCode').textContent=ledHex+' target color';
  return ledColor;
 }
