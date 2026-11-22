@@ -23,7 +23,7 @@
     .now{display:flex;gap:16px;align-items:center;min-height:110px}.cover{height:110px;width:110px;object-fit:cover;border-radius:10px;background:#30333d}
     .swatch{width:36px;height:36px;border-radius:10px;display:inline-block;vertical-align:middle;border:1px solid #fff3;margin-right:6px}
     .song{font-weight:750;font-size:17px}small{color:#a3aaba}pre{white-space:pre-wrap;word-break:break-word;background:#0d0f13;color:#cbd3e0;border-radius:10px;padding:15px;max-height:210px;overflow:auto;font-size:12px}
-    .tiny{font-size:12px}#alert{color:#ffc579;white-space:pre-wrap}#startBtn{font-size:17px}
+    .tiny{font-size:12px}#startBtn{font-size:17px}
     @media(max-width:690px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.cover{width:80px;height:80px}.now{min-height:80px}}
 
     .heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
@@ -37,13 +37,14 @@
     .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.color-controls label{margin-top:0}
     input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
     .hex-control{flex:1;min-width:140px}
-    .log-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.log-heading h2,.log-heading button{margin:0}
+    .artwork-heading{font-size:16px;margin:18px 0 10px}.now>div{min-width:0;overflow-wrap:anywhere}.cover{flex-shrink:0}
+    .state:empty{margin:0}
     #logCopyText{width:100%;min-height:130px;background:#111318;color:#ededf2;border:1px solid #525662;border-radius:9px;padding:10px;font:12px monospace}
     details summary{cursor:pointer;color:#bac2d0}details[open] summary{margin-bottom:12px}
     dialog{width:min(620px,calc(100% - 28px));max-height:85vh;overflow:auto;color:#ededf2;background:#1b1e26;border:1px solid #525662;border-radius:16px;padding:22px}
     dialog::backdrop{background:#080b12cc}.dialog-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
     .dialog-heading h2{font-size:22px;margin:0}.dialog-heading button{margin:0}
-    dialog h3{font-size:16px;margin:22px 0 8px}#alert{margin:12px 0}#settingsStatus{color:#a6c9ff}
+    dialog h3{font-size:16px;margin:22px 0 8px}#alert,#settingsAlert{color:#ffc579;white-space:pre-wrap;margin:12px 0}#alert:empty,#settingsAlert:empty{margin:0}#settingsStatus{color:#a6c9ff}
     @media(max-width:690px){.heading h1{font-size:26px}.heading .chip{display:none}.heading button{padding:9px}}
     #nowPlayingView{--display-padding:clamp(20px,5vmin,56px);position:fixed;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;padding:var(--display-padding);border:0;border-radius:0;background:#111318}
     #nowPlayingView[open]{display:grid;grid-template-rows:1fr}
@@ -76,9 +77,9 @@
     @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
     #displayTitle{font-size:clamp(30px,6.6vmin,86px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
     #displayArtist{font-size:clamp(19px,4vmin,46px);overflow-wrap:anywhere}
-    #displaySpotify{display:inline-block;margin-top:12px}
-    #displaySpotify img{display:block;width:84px;height:auto}
-    #displaySpotify[hidden]{display:none}
+    .spotify-attribution{display:inline-block;margin-top:12px}
+    .spotify-attribution img{display:block;width:84px;height:auto}
+    .spotify-attribution[hidden]{display:none}
     @media(orientation:portrait){
       .display-content{grid-template-columns:1fr;text-align:center}
       .display-art{width:min(80vw,49vh)}
@@ -95,7 +96,6 @@
   <section class="panel">
     <button id="startupBtn" class="primary" type="button">Start Album Glow</button>
     <button id="stopBtn" type="button">Stop syncing</button>
-    <p class="tiny">Connect your lights and start Spotify sync with your saved settings. First-time sign-in or browser permission may still be needed.</p>
     <div id="startupStatus" class="state" role="status">Ready when you are. You can also connect Bluetooth and use colors without Spotify.</div>
     <div id="syncStatus" class="state" role="status">Not syncing</div>
     <div id="alert" role="alert"></div>
@@ -103,7 +103,6 @@
   <div class="grid">
     <section class="panel" aria-labelledby="manualHeading">
       <h2 id="manualHeading">Pick your color</h2>
-      <p class="tiny">No Spotify needed. Choosing a color pauses Spotify sync. Presets, the picker, and valid hex entries update your lights as you edit.</p>
       <div class="preset-grid" id="presets" aria-label="Preset colors">
         <button class="preset" type="button" data-color="#FF0000" aria-pressed="false"><span class="preset-dot" style="--preset:#FF0000" aria-hidden="true"></span>Red</button>
         <button class="preset" type="button" data-color="#FF7A00" aria-pressed="false"><span class="preset-dot" style="--preset:#FF7A00" aria-hidden="true"></span>Orange</button>
@@ -119,41 +118,28 @@
         <div><label for="manualPicker">Color picker</label><input id="manualPicker" type="color" value="#ff0000"></div>
         <div class="hex-control"><label for="manualHex">Hex color</label><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-describedby="manualStatus"></div>
       </div>
-      <div class="state" id="manualStatus" role="status">Connect Bluetooth to apply a color. Your last manual color is remembered.</div>
+      <div class="state" id="manualStatus" role="status"></div>
     </section>
     <section class="panel">
       <h2>Lights</h2>
-      <button id="btBtn" class="primary" type="button">Connect Bluetooth</button>
-      <button id="btDisconnectBtn" type="button">Disconnect lights</button>
-      <div class="state" id="btStatus" role="status">Not connected</div>
       <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
       <button id="ledPowerOffBtn" type="button" hidden disabled>Turn LEDs off</button>
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
-      <p class="tiny">Brightness dims RGB output. Power commands still need confirmation on your controller.</p>
-    </section>
-    <section class="panel wide">
-      <h2>From your album artwork</h2>
+      <h3 class="artwork-heading">From your album artwork</h3>
       <div class="now">
         <img id="cover" class="cover" alt="Currently playing album cover" hidden>
         <div>
           <div id="song" class="song">No song loaded</div>
           <div id="artist" style="color:#a8aeb9">Play a song on Spotify on either device.</div>
           <div style="margin-top:10px"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
-          <div class="tiny" id="originalColor" style="color:#a3aaba">Original cover color: —</div>
-          <div class="tiny"><a id="albumLink" href="https://open.spotify.com/" target="_blank" rel="noreferrer">Open Spotify ↗</a> · Artwork courtesy of Spotify</div>
+          <a id="albumLink" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
         </div>
       </div>
       <button id="startBtn" class="primary" type="button">Resume Spotify sync</button>
       <button id="checkBtn" type="button">Check Spotify now</button>
       <button id="nowPlayingBtn" type="button" aria-haspopup="dialog">Open Now Playing</button>
-    </section>
-    <section class="panel wide">
-      <div class="log-heading"><h2>Connection log</h2><button id="copyLogBtn" type="button">Copy log</button></div>
-      <details><summary>Show log</summary><pre id="log" aria-live="polite">Ready. Use Start Album Glow, or connect Bluetooth to pick a color.</pre></details>
-      <div id="logCopyStatus" class="state" role="status"></div>
-      <div id="logCopyFallback" hidden><label for="logCopyText">Log ready to copy</label><textarea id="logCopyText" readonly></textarea></div>
     </section>
   </div>
   <dialog id="nowPlayingView" aria-labelledby="displayHeading">
@@ -170,7 +156,7 @@
         <p id="displayState"><span id="playingBars" class="playing-bars" aria-hidden="true" hidden><span></span><span></span><span></span></span><span id="displayStateLabel">Waiting for Spotify</span></p>
         <h3 id="displayTitle">Connect Spotify</h3>
         <p id="displayArtist">Return to Album Glow to sign in.</p>
-        <a id="displaySpotify" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
+        <a id="displaySpotify" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
       </div>
     </div>
   </dialog>
@@ -189,6 +175,12 @@
         <div class="redirect-controls"><input id="redirect" readonly><button id="copyRedirectBtn" type="button">Copy</button></div>
       </details>
     </section>
+    <section aria-labelledby="bluetoothSettingsTitle">
+      <h3 id="bluetoothSettingsTitle">Bluetooth</h3>
+      <button id="btBtn" class="primary" type="button">Connect Bluetooth</button>
+      <button id="btDisconnectBtn" type="button">Disconnect lights</button>
+      <div class="state" id="btStatus" role="status">Not connected</div>
+    </section>
     <details>
       <summary>Advanced Bluetooth &amp; optional color tests</summary>
       <p class="tiny">Close Apollo Lighting on your phone and other Album Glow tabs before connecting.</p>
@@ -203,6 +195,14 @@
     </details>
     <button id="saveSettingsBtn" class="primary" type="button">Save settings</button>
     <div class="state" id="settingsStatus" role="status"></div>
+    <div id="settingsAlert" role="alert"></div>
+    <details>
+      <summary>Connection log</summary>
+      <button id="copyLogBtn" type="button">Copy log</button>
+      <pre id="log">Ready. Use Start Album Glow, or connect Bluetooth in Settings.</pre>
+      <div id="logCopyStatus" class="state" role="status"></div>
+      <div id="logCopyFallback" hidden><label for="logCopyText">Log ready to copy</label><textarea id="logCopyText" readonly></textarea></div>
+    </details>
   </dialog>
 </main>
 <script src="bluetooth-ownership.js"></script>
@@ -319,7 +319,12 @@ function setLedBrightness(value){
 const readStoredJson=key=>JSON.parse(localStorage.getItem(key)||'null');
 function log(s){const e=$('log');e.textContent=(e.textContent+'\n'+new Date().toLocaleTimeString()+': '+s).split('\n').slice(-300).join('\n');e.scrollTop=e.scrollHeight}
 function status(kind,s){$(kind+'Status').textContent=s;log(kind.toUpperCase()+': '+s)}
-function err(e){if(e?.name==='AbortError')return;let m=String(e?.message||e);$('alert').textContent=m;log('ERROR: '+m)}
+function err(e){
+ if(e?.name==='AbortError')return;
+ const message=String(e?.message||e);
+ $($('settingsDialog').open?'settingsAlert':'alert').textContent=message;
+ log('ERROR: '+message);
+}
 async function copyConnectionLog(){
  if($('copyLogBtn').disabled)return;
  const text=$('log').textContent;
@@ -340,6 +345,7 @@ async function copyConnectionLog(){
  }finally{$('copyLogBtn').disabled=false}
 }
 function openSettings(message=''){
+ $('settingsAlert').textContent='';
  $('settingsStatus').textContent=message;
  if(!$('settingsDialog').open)$('settingsDialog').showModal();
  if(message){$('spotifySetup').open=true;$('clientId').focus()}
@@ -478,7 +484,6 @@ async function spotifyConnect(){
   const params=new URLSearchParams({client_id:id,response_type:'code',redirect_uri:REDIRECT,code_challenge_method:'S256',code_challenge:await challenge(verifier),state,scope:'user-read-currently-playing'});
   location.assign('https://accounts.spotify.com/authorize?'+params);navigating=true;return true;
  }catch(e){
-  if($('settingsDialog').open)$('settingsStatus').textContent=e.message;
   err(e);return false;
  }finally{if(!navigating)spotifyLoginPending=false;renderStartup()}
 }
@@ -673,7 +678,6 @@ function updateColorDisplay(raw){
  const ledHex=hex(ledColor);
  $('swatch').style.backgroundColor=ledHex;
  $('colorCode').textContent=ledHex+' target color';
- $('originalColor').textContent='Original cover color: '+hex(raw);
  return ledColor;
 }
 function extractColor(img){
@@ -730,7 +734,9 @@ function renderNowPlaying(payload,problem){
   if(art)image.src=art;
   else image.removeAttribute('src');
  }
- const link=$('displaySpotify');
+ updateSpotifyLink($('displaySpotify'),track);
+}
+function updateSpotifyLink(link,track){
  const url=track?.external_urls?.spotify || track?.album?.external_urls?.spotify;
  link.hidden=!/^https:\/\/open\.spotify\.com\//i.test(url);
  if(!link.hidden)link.href=url;
@@ -744,10 +750,10 @@ function coverLoad(url){return new Promise((resolve,reject)=>{
 async function updateSong(payload,run=syncGeneration){
  const track=payload.item;
  if(!track||!track.album){log('Spotify item had no album art');return}
- const album=track.album, link=track.external_urls?.spotify || album.external_urls?.spotify ||'https://open.spotify.com/';
+ const album=track.album;
  $('song').textContent=track.name||'Unknown track';
  $('artist').textContent=(track.artists||[]).map(a=>a.name).join(', ')+' · '+album.name;
- $('albumLink').href=link;
+ updateSpotifyLink($('albumLink'),track);
  if(currentAlbum===album.id)return;
  const art=(album.images||[]).find(a=>a?.url)?.url;
  if(!art)throw Error('Spotify returned no album art for this track.');
@@ -820,15 +826,14 @@ async function checkSpotify(){
   playbackLoaded=true;
   if(!syncing && $('nowPlayingView').open)return;
   if(!data?.item){
-   const detail=statusCode===204?'no active playback':'no active track';
-   $('syncStatus').textContent='Syncing · '+detail+' · checking every '+(SPOTIFY_POLL_INTERVAL_MS/1000)+'s';
+   $('syncStatus').textContent=statusCode===204?'No active Spotify playback':'No active Spotify track';
    return;
   }
   const before=currentAlbum;
   if(!syncing || lightsReady())await updateSong(data,run);
   if(run!==syncGeneration)return;
   if(before!==currentAlbum && currentAlbum)log('New album detected and LED color updated.');
-  $('syncStatus').textContent='Syncing · checking every '+(SPOTIFY_POLL_INTERVAL_MS/1000)+'s'+(document.hidden?' · tab in background (may be slower)':'');
+  $('syncStatus').textContent='';
  }catch(e){
   if(e.name==='AbortError' || run!==syncGeneration)return;
   if(!playbackLoaded && spotifyToken)renderNowPlaying(null,'Check your connection or reconnect Spotify in Album Glow.');
@@ -837,11 +842,11 @@ async function checkSpotify(){
 }
 function startSync(){
  if(!spotifyToken){err(Error('Connect Spotify first, or use a manual color.'));return}
- if(!device?.gatt?.connected){err(Error('Connect Bluetooth first, or use Start Album Glow to connect and sync.'));return}
+ if(!device?.gatt?.connected){err(Error('Connect Bluetooth in Settings, or use Start Album Glow.'));return}
  if(!char){err(Error('No writable LED characteristic was found.'));return}
  if(syncing)return;
  cancelStartup();cancelLiveColorInput();manualRequested=false;
- $('startupStatus').textContent='Album Glow is syncing with Spotify.';
+ $('startupStatus').textContent='';
  currentAlbum=''; // Resend current album color on every fresh start.
  syncing=true;syncGeneration++;
  $('alert').textContent='';
@@ -861,7 +866,10 @@ function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
 $('spotifyBtn').onclick=spotifyConnect;
 $('logoutSpotifyBtn').onclick=spotifyLogout;
 enableColorTests(false);
-$('btBtn').onclick=()=>pickBluetooth();
+$('btBtn').onclick=()=>{
+ $('settingsAlert').textContent='';
+ return pickBluetooth();
+};
 $('changeDeviceBtn').onclick=()=>{ $('settingsDialog').close();return pickBluetooth({forceChooser:true}) };
 $('startupBtn').onclick=startAlbumGlow;
 $('btDisconnectBtn').onclick=btDisconnect;
