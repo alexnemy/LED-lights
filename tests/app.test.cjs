@@ -179,9 +179,9 @@ test('playback fetched for an old Bluetooth session is ignored after a disconnec
 });
 
 test('vivid color mode preserves saturated red behavior and can be disabled', t=>{
-  const h=harness(t);h.element('vividColors').checked=true;
+  const h=harness(t), original=harness(t,{saved:{albumglow_vivid:'false'}});
   const vivid=Array.from(h.run('vividColor([232,40,56])'));assert.deepEqual(vivid,[232,0,0]);
-  h.element('vividColors').checked=false;assert.deepEqual(Array.from(h.run('vividColor([232,40,56])')),[232,40,56]);
+  assert.deepEqual(Array.from(original.run('vividColor([232,40,56])')),[232,40,56]);
 });
 
 
@@ -232,7 +232,7 @@ test('revoked saved-device access falls back to a chooser from the next user cli
 
 test('missing Spotify setup opens Settings without a Bluetooth chooser or OAuth redirect', async t=>{
   const h=harness(t);await h.run('startAlbumGlow()');
-  assert.equal(h.element('settingsDialog').open,true);assert.equal(h.element('clientId').focused,true);
+  assert.equal(h.element('settingsDialog').open,true);assert.equal(h.element('spotifySetup').open,true);assert.equal(h.element('clientId').focused,true);
   assert.equal(h.chooserCalls.length,0);assert.equal(h.redirects.length,0);
   assert.equal(h.device.gatt.connected,false);
 });
@@ -296,7 +296,7 @@ test('Stop during pending startup prevents late chooser result from starting syn
 });
 
 test('manual hex colors send exact RGB without Spotify, even when vivid mode is enabled', async t=>{
-  const h=harness(t);await h.connect();h.element('vividColors').checked=true;
+  const h=harness(t);await h.connect();
   await h.run('applyManualColor("#E82838")');
   assert.deepEqual(h.writes.at(-1),[0x78,232,40,56,0,0xf0,0xee]);
   assert.equal(h.run('syncing'),false);assert.equal(h.requests.length,0);
@@ -741,4 +741,19 @@ test('Now Playing controls appear on pointer activity and hide after the last mo
   assert.ok(controls.every(isRevealed));
   t.mock.timers.tick(2500);
   assert.ok(controls.every(control=>!isRevealed(control)));
+});
+
+test('Spotify checks on a two-second interval even with an older saved interval', async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const h=harness(t,{saved:{...savedSpotify(),albumglow_interval:'15000'}});
+  h.element('nowPlayingBtn').onclick();
+  t.mock.timers.tick(0);
+  await settle();
+  assert.equal(h.requests.length,1);
+  t.mock.timers.tick(1999);
+  await settle();
+  assert.equal(h.requests.length,1);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(h.requests.length,2);
 });

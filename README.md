@@ -15,11 +15,11 @@ Album Glow turns Spotify album artwork into a color for Apollo Bluetooth LEDs. I
 
 ## Daily use
 
-**Start Album Glow** connects Bluetooth and starts Spotify sync using your saved settings. There is no mandatory color test or checkbox. Your existing Client ID, Spotify tokens, brightness, vivid mode, and interval retain their original browser-storage keys.
+**Start Album Glow** connects Bluetooth and starts Spotify sync using your saved settings. There is no mandatory color test or checkbox. Your existing Client ID, Spotify tokens, brightness, and previously chosen vivid mode retain their original browser-storage keys.
 
 On Chrome versions that support previously granted device access, the app loads the saved controller permission and reuses it on your click. Otherwise Chrome opens its chooser directly from that click. Revoked permission, a different browser/profile, or first use can require the chooser again. Nothing silently opens a permission prompt.
 
-For the first Spotify sign-in only, open **Settings**, enter the public **Client ID**, and save. Use the same Spotify app; never enter a Client Secret. Keep its redirect exactly `https://cosmic-snickerdoodle-3a661b.netlify.app/`. If you previously used this site, your saved Client ID is already filled in. The main **Connect Spotify** button is still available. Signing into Spotify navigates away from the page, so startup signs in before Bluetooth and then asks you to click **Start Album Glow** after returning. Subsequent startup with saved authentication uses the single button. Browser permission and Spotify approval cannot be bypassed.
+For the first Spotify sign-in only, open **Settings**, enter the public **Client ID**, and save. Use the same Spotify app; never enter a Client Secret. Keep its redirect exactly `https://cosmic-snickerdoodle-3a661b.netlify.app/`. If you previously used this site, your saved Client ID is already filled in. Use **Connect Spotify** in Settings. Signing into Spotify navigates away from the page, so startup signs in before Bluetooth and then asks you to click **Start Album Glow** after returning. Subsequent startup with saved authentication uses the single button. Browser permission and Spotify approval cannot be bypassed.
 
 Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn off iPhone Bluetooth when isolating connection failures. Bluetooth retries remain bounded. A pending startup waits through those retries; **Stop syncing**, a manual color, or **Disconnect lights** cancels the pending sync intent.
 
@@ -36,11 +36,11 @@ The last manual hex color is saved locally and shown after reloading. Picking a 
 
 ## Settings and optional checks
 
-The **Settings** button opens a keyboard-accessible dialog containing the Client ID, exact redirect URI and Copy button, polling speed, vivid mode, and advanced Bluetooth options. Escape or Close dismisses it. The main page retains both connection buttons, disconnect controls, brightness, power, presets, and the hex/color picker. Diagnostics are under **Connection log**. **Copy log** copies the whole current log (up to the retained 300 lines), even when its display is collapsed. A confirmation appears on success. If browser clipboard access is blocked, a selected text box lets you press Ctrl+C or use a normal Copy action; it does not send logs anywhere automatically.
+The **Settings** button opens a keyboard-accessible dialog containing Spotify connection controls, a collapsible Spotify app setup section, and advanced Bluetooth options. Escape or Close dismisses it. The main page retains Bluetooth connection controls, brightness, power, presets, and the hex/color picker. Diagnostics are under **Connection log**. **Copy log** copies the whole current log (up to the retained 300 lines), even when its display is collapsed. A confirmation appears on success. If browser clipboard access is blocked, a selected text box lets you press Ctrl+C or use a normal Copy action; it does not send logs anywhere automatically.
 
 In **Advanced Bluetooth & optional color tests**, you can choose a different controller, enter a custom service, change the writable characteristic, run red/green/blue tests, and optionally remember the visually verified endpoint. That checkbox is only for verified endpoint caching, not permission to use Spotify sync. Initializer selection and browser write completion are not physical verification. Selecting another characteristic still stops sync so you can decide what to send next.
 
-The available polling intervals remain 2, 3, 5, 8, and 15 seconds. The browser avoids overlapping playback requests and honors Spotify's HTTP 429 cooldown. Background tabs and Spotify's reporting delay can slow updates. Account/app eligibility and Spotify's current developer access rules still apply.
+Spotify checks run every two seconds during normal operation. The browser avoids overlapping playback requests and honors Spotify's HTTP 429 cooldown. Background tabs and Spotify's reporting delay can slow updates. Account/app eligibility and Spotify's current developer access rules still apply.
 
 Brightness is **0–100% RGB scaling**, not the controller's separate hardware brightness register. A saved RGB value describes the last website command, not a readback of the physical strip: changes made later in Apollo Lighting are not detected. If no color is known for this controller, the slider applies the visible manual selection with an explicit message instead of silently doing nothing. It does not send an invented hardware-brightness command. Power uses the original Apollo-family bytes `CC2333` (on) and `CC2433` (off); these are **unverified on this particular controller**. A “bytes sent” message describes browser completion, not physical confirmation. If power does not work, do not infer that a different undocumented command is correct.
 
@@ -99,7 +99,7 @@ Deploy **all three** browser files: `index.html`, `bluetooth-ownership.js`, and 
 
 Spotify uses Authorization Code with PKCE, with the existing `user-read-currently-playing` scope. Access/refresh tokens stay in this browser's local storage and are sent to Spotify when required. There is no token backend. Like the original app, browser storage is not encrypted storage: use a trusted device. Disconnect Spotify to remove its saved tokens; revoke app access in Spotify if needed.
 
-Client ID, brightness, vivid mode, and polling interval retain their original storage keys. New Bluetooth endpoint data is local to the site/browser and contains no Spotify tokens. A new hostname or browser profile has separate storage. Logs are capped at 300 lines and do not intentionally log token values or OAuth URLs. Do not commit browser storage exports, tokens, `.env` files, or screenshots containing account details. The build only publishes the three browser files.
+Client ID, brightness, and saved vivid mode retain their original storage keys. New Bluetooth endpoint data is local to the site/browser and contains no Spotify tokens. A new hostname or browser profile has separate storage. Logs are capped at 300 lines and do not intentionally log token values or OAuth URLs. Do not commit browser storage exports, tokens, `.env` files, or screenshots containing account details. The build only publishes the three browser files.
 
 ## References
 
