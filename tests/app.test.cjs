@@ -15,7 +15,7 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
   const storage = (seed={}) => {const data=new Map(Object.entries(seed));return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};};
   const element = id => {
     if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,textContent:'',style:{},classList:{toggle(){}},
-      attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];},removeAttribute(k){delete this.attributes[k];delete this[k];},focus(){this.focused=true;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},
+      attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];},toggleAttribute(k,force){if(force)this.setAttribute(k,'');else this.removeAttribute(k);},removeAttribute(k){delete this.attributes[k];delete this[k];},focus(){this.focused=true;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},
       children:[],replaceChildren(){this.children=[];this.value='';},append(opt){this.children.push(opt);},select(){}});
     return elements.get(id);
   };
@@ -678,9 +678,11 @@ test('Now Playing polls without Bluetooth and renders skips, pauses, and missing
   await h.run('checkSpotify()');
   assert.equal(h.element('displayTitle').textContent,'Second song');
   assert.equal(h.element('displayStateLabel').textContent,'Paused');
-  assert.equal(h.element('playingBars').hidden,true);
+  assert.equal(h.element('playingBars').hidden,false);
+  assert.equal(h.element('playingBars').getAttribute('data-paused'),'');
   payload={item:{...song,album:{id:'no-cover',images:[]}},is_playing:true};
   await h.run('checkSpotify()');
+  assert.equal(h.element('playingBars').getAttribute('data-paused'),undefined);
   assert.equal(h.element('displayCover').src,undefined);
   assert.equal(h.element('displayCover').hidden,true);
   assert.deepEqual(h.writes,[]);
