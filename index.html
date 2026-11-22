@@ -27,7 +27,7 @@
     @media(max-width:690px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.cover{width:80px;height:80px}.now{min-height:80px}}
 
     .heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
-    .heading-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+    .heading-actions{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
     .heading h1{margin:0}.heading button{margin:0;flex-shrink:0}
     #startupBtn{font-size:18px;padding:13px 22px}#startupStatus{margin-bottom:0}
     .preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
@@ -35,7 +35,11 @@
     .preset{display:flex;align-items:center;justify-content:center;gap:7px;margin:0;padding:10px 6px;min-width:0}
     .preset-dot{width:16px;height:16px;border-radius:50%;background:var(--preset);border:1px solid #ffffff55;flex-shrink:0}
     .preset[aria-pressed="true"]{border-color:#a6c9ff;background:#354862}
-    .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.color-controls label{margin-top:0}
+    .grid > .panel{display:flex;flex-direction:column}
+    .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-top:auto}
+    .color-controls input{display:block}
+    .light-color{margin:10px 0}
+    #nowPlayingBtn{align-self:flex-start;margin:auto 0 0}
     input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
     .hex-control{flex:1;min-width:140px}
     .now>div{min-width:0;overflow-wrap:anywhere}.cover{flex-shrink:0}
@@ -123,11 +127,11 @@
         <button class="preset" type="button" data-color="#FF1493" aria-pressed="false"><span class="preset-dot" style="--preset:#FF1493" aria-hidden="true"></span>Pink</button>
         <button class="preset" type="button" data-color="#FFFFFF" aria-pressed="false"><span class="preset-dot" style="--preset:#FFFFFF" aria-hidden="true"></span>White</button>
       </div>
-      <div class="color-controls">
-        <div><label for="manualPicker">Color picker</label><input id="manualPicker" type="color" value="#ff0000"></div>
-        <div class="hex-control"><label for="manualHex">Hex color</label><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-describedby="manualStatus"></div>
-      </div>
       <div class="state" id="manualStatus" role="status"></div>
+      <div class="color-controls">
+        <input id="manualPicker" type="color" value="#ff0000" aria-label="Color picker">
+        <div class="hex-control"><input id="manualHex" value="#FF0000" placeholder="#FF0000" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Hex color" aria-describedby="manualStatus"></div>
+      </div>
     </section>
     <section class="panel">
       <h2>Lights</h2>
@@ -136,7 +140,7 @@
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
-      <div style="margin-top:10px"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
+      <div class="light-color"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
       <button id="nowPlayingBtn" type="button" aria-haspopup="dialog">Open Now Playing</button>
     </section>
   </div>
