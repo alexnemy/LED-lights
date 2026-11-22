@@ -60,11 +60,11 @@
     @media(prefers-reduced-motion:reduce){.display-header{transition:none}}
     .display-header h2{margin:0;font-size:clamp(20px,3.3vmin,32px)}
     .display-header button{margin:0}
-    .display-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:center;gap:clamp(18px,5vmin,56px);width:min(100%,1340px);margin:auto}
-    .display-art{display:grid;place-items:center;width:min(100%,72vh);aspect-ratio:1;overflow:hidden;justify-self:center;background:#242936;color:#aab3c5;border-radius:12px;font-size:clamp(60px,18vmin,164px)}
+    .display-content{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,1.15fr);align-items:center;gap:clamp(18px,5vmin,56px);width:min(100%,1340px);margin:auto}
+    .display-art{display:grid;place-items:center;width:min(100%,76vh);aspect-ratio:1;overflow:hidden;justify-self:center;background:#242936;color:#aab3c5;border-radius:12px;font-size:clamp(60px,18vmin,164px)}
     .display-art > *{grid-area:1/1}
     #displayCover{width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;background:#111318}
-    #displayState{color:#b6d0ff;font-size:clamp(18px,3.3vmin,31px);font-weight:650;margin:0 0 8px}
+    #displayState{color:#b6d0ff;font-size:clamp(19px,3.5vmin,33px);font-weight:650;margin:0 0 8px}
     .playing-bars{display:inline-flex;gap:.09em;align-items:end;height:.78em;margin-inline-end:.32em}
     .playing-bars[hidden]{display:none}
     .playing-bars[data-paused] span{animation-play-state:paused}
@@ -79,14 +79,14 @@
       70%{transform:scaleY(.76)}
     }
     @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
-    #displayTitle{font-size:clamp(30px,6.6vmin,86px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
-    #displayArtist{font-size:clamp(19px,4vmin,46px);overflow-wrap:anywhere}
+    #displayTitle{font-size:clamp(32px,7vmin,91px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
+    #displayArtist{font-size:clamp(20px,4.25vmin,49px);overflow-wrap:anywhere}
     .spotify-attribution{display:inline-block;margin-top:12px}
     .spotify-attribution img{display:block;width:84px;height:auto}
     .spotify-attribution[hidden]{display:none}
     @media(orientation:portrait){
       .display-content{grid-template-columns:1fr;text-align:center}
-      .display-art{width:min(80vw,49vh)}
+      .display-art{width:min(83vw,51vh)}
     }
   </style>
 </head>
@@ -136,7 +136,6 @@
     <section class="panel">
       <h2>Lights</h2>
       <button id="ledPowerBtn" type="button" disabled>Turn LEDs on</button>
-      <button id="ledPowerOffBtn" type="button" hidden disabled>Turn LEDs off</button>
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
@@ -238,8 +237,6 @@ function renderLedControls(){
  $('ledPowerBtn').disabled=ledPowerBusy||!connected;
  $('ledPowerBtn').textContent=turnOff?'Turn LEDs off':'Turn LEDs on';
  $('ledPowerBtn').classList.toggle('green',turnOff);
- $('ledPowerOffBtn').hidden=!connected||ledPowerKnown;
- $('ledPowerOffBtn').disabled=$('ledPowerBtn').disabled;
  $('ledBrightness').value=String(ledBrightness);
  $('ledBrightnessValue').textContent=ledBrightness+'%';
 }
@@ -530,7 +527,7 @@ const bluetooth=new AlbumGlowBluetooth({
   }
  },
  onClear:()=>{
-  // Bluetooth cannot read power state. Offer both actions on the next connection.
+  // Bluetooth cannot read power state. Start with an On action on the next connection.
   ledPowerKnown=false;
   $('ledControlsStatus').textContent='Connect Bluetooth to use power controls.';
   char=null;currentAlbum='';syncGeneration++;cancelLiveColorInput();
@@ -887,7 +884,6 @@ $('testBtn').onclick=()=>testColor(255,0,0);
 $('testGreen').onclick=()=>testColor(0,255,0);
 $('testBlue').onclick=()=>testColor(0,0,255);
 $('ledPowerBtn').onclick=()=>setLedPower(!(ledPowerKnown && ledIsOn));
-$('ledPowerOffBtn').onclick=()=>setLedPower(false);
 $('ledBrightness').oninput=e=>setLedBrightness(e.target.value);
 renderLedControls();
 $('displayCover').onload=()=>{$('displayCover').hidden=!displayArtwork};

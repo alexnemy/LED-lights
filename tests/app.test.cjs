@@ -62,32 +62,29 @@ test('RGB tests and brightness still use original color frame with RGB scaling',
   assert.equal(h.context.localStorage.getItem('albumglow_brightness'),'50');
 });
 
-test('power offers explicit on and off actions after connecting until a power write succeeds', async t=>{
-  const h=harness(t), power=h.element('ledPowerBtn'), turnOff=h.element('ledPowerOffBtn');
+test('one power button toggles after a successful write and offers On after reconnecting', async t=>{
+  const h=harness(t), power=h.element('ledPowerBtn');
   assert.equal(power.disabled,true);
-  assert.equal(turnOff.hidden,true);
   await h.connect();
   assert.equal(power.disabled,false);
   assert.equal(power.textContent,'Turn LEDs on');
-  assert.equal(turnOff.hidden,false);
-  assert.equal(turnOff.disabled,false);
   assert.deepEqual(h.writes,[]);
 
   await power.onclick();
   assert.deepEqual(h.writes,[[0xcc,0x23,0x33]]);
   assert.equal(power.textContent,'Turn LEDs off');
-  assert.equal(turnOff.hidden,true);
-
-  h.device.gatt.disconnect();
-  assert.equal(power.disabled,true);
-  assert.equal(turnOff.hidden,true);
-  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
-  assert.equal(power.textContent,'Turn LEDs on');
-  assert.equal(turnOff.hidden,false);
-  await turnOff.onclick();
+  await power.onclick();
   assert.deepEqual(h.writes,[[0xcc,0x23,0x33],[0xcc,0x24,0x33]]);
   assert.equal(power.textContent,'Turn LEDs on');
-  assert.equal(turnOff.hidden,true);
+
+  await power.onclick();
+  assert.equal(power.textContent,'Turn LEDs off');
+  h.device.gatt.disconnect();
+  assert.equal(power.disabled,true);
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  assert.equal(power.disabled,false);
+  assert.equal(power.textContent,'Turn LEDs on');
+  assert.deepEqual(h.writes,[[0xcc,0x23,0x33],[0xcc,0x24,0x33],[0xcc,0x23,0x33]]);
 });
 
 test('power preserves original unverified bytes; colors stay suppressed while off and restore on power on', async t=>{
