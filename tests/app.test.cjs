@@ -94,7 +94,9 @@ test('power preserves original unverified bytes; colors stay suppressed while of
   const count=h.writes.length;await h.run('sendLedRgb(0,0,255)');assert.equal(h.writes.length,count);
   await h.run('setLedPower(true)');
   assert.deepEqual(h.writes.slice(-2),[[0xcc,0x23,0x33],[0x78,0,0,255,0,0xf0,0xee]]);
-  assert.match(h.element('ledControlsStatus').textContent,/unverified/);
+  assert.equal(h.element('ledControlsStatus').textContent,'');
+  assert.match(h.element('log').textContent,/LED power ON command sent/);
+  assert.match(h.element('log').textContent,/LED power OFF command sent/);
 });
 
 test('a power-off intent cancels queued old colors rather than relighting the strip', async t=>{
