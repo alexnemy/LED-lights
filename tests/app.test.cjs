@@ -717,3 +717,23 @@ test('Now Playing shares the LED poll and keeps checking after Bluetooth disconn
   assert.equal(h.element('displayTitle').textContent,'Connect Spotify');
   assert.equal(h.run('syncTimer'),null);
 });
+
+test('Now Playing controls appear on pointer activity and hide after the last movement', t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const h=harness(t);
+  const controls=['nowPlayingBtn','nowPlayingView'].map(h.element);
+  const isRevealed=control=>control.getAttribute('data-pointer-active')==='';
+  assert.ok(controls.every(control=>!isRevealed(control)));
+  h.dispatchDocument('pointermove');
+  assert.ok(controls.every(isRevealed));
+  t.mock.timers.tick(2000);
+  h.dispatchDocument('pointermove');
+  t.mock.timers.tick(2000);
+  assert.ok(controls.every(isRevealed));
+  t.mock.timers.tick(500);
+  assert.ok(controls.every(control=>!isRevealed(control)));
+  h.dispatchDocument('pointerdown',{pointerType:'touch'});
+  assert.ok(controls.every(isRevealed));
+  t.mock.timers.tick(2500);
+  assert.ok(controls.every(control=>!isRevealed(control)));
+});
