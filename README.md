@@ -21,7 +21,7 @@ On Chrome versions that support previously granted device access, the app loads 
 
 For the first Spotify sign-in only, open **Settings**, enter the public **Client ID**, and save. Use the same Spotify app; never enter a Client Secret. Keep its redirect exactly `https://cosmic-snickerdoodle-3a661b.netlify.app/`. If you previously used this site, your saved Client ID is already filled in. Use **Connect Spotify** in Settings. Signing into Spotify navigates away from the page, so startup signs in before Bluetooth and then asks you to click **Start Album Glow** after returning. Subsequent startup with saved authentication uses the single button. Browser permission and Spotify approval cannot be bypassed.
 
-Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn off iPhone Bluetooth when isolating connection failures. Bluetooth retries remain bounded. A pending startup waits through those retries; **Stop syncing**, a manual color, or **Disconnect lights** cancels the pending sync intent.
+Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn off iPhone Bluetooth when isolating connection failures. Bluetooth retries remain bounded. A pending startup waits through those retries; Choosing a manual color or selecting **Disconnect lights** cancels the pending sync intent.
 
 ## Colors without Spotify
 
