@@ -59,11 +59,16 @@
     #displayState{color:#b6d0ff;font-size:clamp(18px,3.3vmin,31px);font-weight:650;margin:0 0 8px}
     .playing-bars{display:inline-flex;gap:.09em;align-items:end;height:.78em;margin-inline-end:.32em}
     .playing-bars[hidden]{display:none}
-    .playing-bars span{width:.10em;height:100%;border-radius:1em;background:currentColor;transform-origin:bottom;transform:scaleY(var(--rest));animation:playing-bar .9s ease-in-out infinite alternate}
-    .playing-bars span:nth-child(1){--rest:.45;animation-delay:-.5s}
-    .playing-bars span:nth-child(2){--rest:.85;animation-delay:-.1s}
-    .playing-bars span:nth-child(3){--rest:.6;animation-delay:-.7s}
-    @keyframes playing-bar{from{transform:scaleY(.28)}to{transform:scaleY(1)}}
+    .playing-bars span{width:.11em;height:100%;border-radius:1em;background:currentColor;transform-origin:bottom;transform:scaleY(var(--rest));animation:playing-bar var(--speed) linear infinite}
+    .playing-bars span:nth-child(1){--rest:.45;--speed:.56s;animation-delay:-.14s}
+    .playing-bars span:nth-child(2){--rest:.85;--speed:.43s;animation-delay:-.31s}
+    .playing-bars span:nth-child(3){--rest:.6;--speed:.63s;animation-delay:-.46s}
+    @keyframes playing-bar{
+      0%,100%{transform:scaleY(.16)}
+      22%{transform:scaleY(1)}
+      49%{transform:scaleY(.25)}
+      70%{transform:scaleY(.76)}
+    }
     @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
     #displayTitle{font-size:clamp(30px,6.6vmin,86px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
     #displayArtist{font-size:clamp(19px,4vmin,46px);overflow-wrap:anywhere}
