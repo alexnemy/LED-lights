@@ -15,7 +15,7 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
   const storage = (seed={}) => {const data=new Map(Object.entries(seed));return {getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k)};};
   const element = id => {
     if(!elements.has(id))elements.set(id,{value:'',checked:false,disabled:false,textContent:'',style:{},classList:{toggle(){}},
-      attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];},focus(){this.focused=true;},showModal(){this.open=true;},close(){this.open=false;},
+      attributes:{},setAttribute(k,v){this.attributes[k]=v;},getAttribute(k){return this.attributes[k];},removeAttribute(k){delete this.attributes[k];delete this[k];},focus(){this.focused=true;},showModal(){this.open=true;},close(){this.open=false;this.onclose?.();},
       children:[],replaceChildren(){this.children=[];this.value='';},append(opt){this.children.push(opt);},select(){}});
     return elements.get(id);
   };
@@ -25,7 +25,7 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
     gatt:{connected:false,async connect(){this.connected=true;return this;},disconnect(){this.connected=false;for(const f of listeners)f();},
       async getPrimaryServices(){return [{uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristics(){return [c];}}];},
       async getPrimaryService(){return {uuid:'0000ffe0-0000-1000-8000-00805f9b34fb',async getCharacteristic(){return c;}};}}};
-  const sandbox={console,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
+  const sandbox={console,DOMException,URLSearchParams,URL,TextEncoder,Uint8Array,Date,Math,crypto:globalThis.crypto,
     btoa:s=>Buffer.from(s,'binary').toString('base64'),setTimeout,clearTimeout,
     addEventListener:(type,listener)=>listen(windowEvents,type,listener),
     document:{getElementById:element,createElement:()=>({}),querySelectorAll:()=>[],addEventListener:(type,listener)=>listen(documentEvents,type,listener),hidden:false},
@@ -38,7 +38,7 @@ function harness(t, {search='', session={}, saved={}, requestDevice, getDevices,
   vm.runInContext(helper,context);vm.runInContext(source,context);
   const run=code=>vm.runInContext(code,context);
   run('bluetooth.writeGap=0');
-  t.after(()=>run('btDisconnect()'));
+  t.after(()=>run("$('nowPlayingView').close();btDisconnect()"));
   return {context,run,element,writes,requests,redirects,device,c,chooserCalls,
     dispatchWindow:(type,event)=>dispatch(windowEvents,type,event),dispatchDocument:(type,event)=>dispatch(documentEvents,type,event),
     async connect(){await run('pickBluetooth()');}};
@@ -651,4 +651,69 @@ test('Copy log falls back to browser selection copy when Clipboard API is unavai
   const h=harness(t);h.context.document.execCommand=command=>command==='copy';
   await h.run('copyConnectionLog()');
   assert.equal(h.element('logCopyFallback').hidden,true);assert.match(h.element('logCopyStatus').textContent,/Log copied/);
+});
+
+test('Now Playing polls without Bluetooth and renders skips, pauses, and missing or broken artwork', async t=>{
+  const h=harness(t);
+  const art='https://i.scdn.co/image/example';
+  const song={name:'First song',artists:[{name:'The Artist'}],album:{id:'album',images:[{url:art}]}};
+  let payload={item:song,is_playing:true};
+  let firstPoll;
+  const called=new Promise(resolve=>{firstPoll=resolve;});
+  h.context.fetch=async()=>({ok:true,status:200,json:async()=>{firstPoll();return payload;}});
+  h.run('spotifyToken={access:"mock",expires:Date.now()+100000}');
+  h.element('nowPlayingBtn').onclick();
+  await called;await settle();
+  assert.equal(h.device.gatt.connected,false);
+  assert.equal(h.element('displayTitle').textContent,'First song');
+  assert.equal(h.element('displayArtist').textContent,'The Artist');
+  assert.equal(h.element('displayState').textContent,'Playing');
+  assert.equal(h.element('displayCover').src,art);
+  h.element('displayCover').onload();
+  assert.equal(h.element('displayCover').hidden,false);
+  h.element('displayCover').onerror();
+  assert.equal(h.element('displayCover').hidden,true);
+  payload={item:{...song,name:'Second song'},is_playing:false};
+  await h.run('checkSpotify()');
+  assert.equal(h.element('displayTitle').textContent,'Second song');
+  assert.equal(h.element('displayState').textContent,'Paused');
+  payload={item:{...song,album:{id:'no-cover',images:[]}},is_playing:true};
+  await h.run('checkSpotify()');
+  assert.equal(h.element('displayCover').src,undefined);
+  assert.equal(h.element('displayCover').hidden,true);
+  assert.deepEqual(h.writes,[]);
+  h.element('closeNowPlayingBtn').onclick();
+  assert.equal(h.run('syncTimer'),null);
+});
+
+test('Now Playing shares the LED poll and keeps checking after Bluetooth disconnects', async t=>{
+  const h=harness(t);
+  await h.connect();
+  h.run('spotifyToken={access:"mock",expires:Date.now()+100000};startSync()');
+  h.element('nowPlayingBtn').onclick();
+  h.run('clearTimeout(syncTimer);syncTimer=null; coverLoad=async()=>({});extractColor=()=>[255,0,0]');
+  const setSong=name=>{h.context.fetch=async()=>({ok:true,status:200,json:async()=>({
+    is_playing:true,item:{name,album:{id:'album',name:'Album',images:[{url:'https://i.scdn.co/image/example'}]}}
+  })});};
+  setSong('With lights');
+  await h.run('checkSpotify()');
+  assert.equal(h.element('displayTitle').textContent,'With lights');
+  assert.equal(h.writes.length,1);
+  h.element('closeNowPlayingBtn').onclick();
+  assert.equal(h.run('syncing'),true);
+  h.element('nowPlayingBtn').onclick();
+  h.run('btDisconnect()');
+  assert.equal(h.run('syncing'),false);
+  assert.notEqual(h.run('syncTimer'),null);
+  setSong('Without lights');
+  await h.run('checkSpotify()');
+  assert.equal(h.element('displayTitle').textContent,'Without lights');
+  assert.equal(h.writes.length,1);
+  h.context.fetch=async()=>({ok:false,status:401});
+  await h.run('checkSpotify()');
+  assert.equal(h.element('displayState').textContent,'Waiting for Spotify');
+  assert.match(h.element('displayArtist').textContent,/reconnect Spotify/);
+  h.run('spotifyLogout()');
+  assert.equal(h.element('displayTitle').textContent,'Connect Spotify');
+  assert.equal(h.run('syncTimer'),null);
 });
