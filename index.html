@@ -23,7 +23,7 @@
     .now{display:flex;gap:16px;align-items:center;min-height:110px}.cover{height:110px;width:110px;object-fit:cover;border-radius:10px;background:#30333d}
     .swatch{width:36px;height:36px;border-radius:10px;display:inline-block;vertical-align:middle;border:1px solid #fff3;margin-right:6px}
     .song{font-weight:750;font-size:17px}small{color:#a3aaba}pre{white-space:pre-wrap;word-break:break-word;background:#0d0f13;color:#cbd3e0;border-radius:10px;padding:15px;max-height:210px;overflow:auto;font-size:12px}
-    .tiny{font-size:12px}#startBtn{font-size:17px}
+    .tiny{font-size:12px}
     @media(max-width:690px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.cover{width:80px;height:80px}.now{min-height:80px}}
 
     .heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
@@ -50,10 +50,9 @@
     #nowPlayingView[open]{display:grid;grid-template-rows:1fr}
     #nowPlayingView[open]:is([data-pointer-active],:has(#closeNowPlayingBtn:focus-visible)){grid-template-rows:auto 1fr;gap:clamp(12px,3vmin,32px)}
     .display-header{position:absolute;inset:var(--display-padding) var(--display-padding) auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
-    #nowPlayingBtn,.display-header{opacity:0;pointer-events:none;transition:opacity .18s ease}
-    #nowPlayingBtn[data-pointer-active],#nowPlayingBtn:focus-visible,
+    .display-header{opacity:0;pointer-events:none;transition:opacity .18s ease}
     #nowPlayingView[data-pointer-active] .display-header,.display-header:has(button:focus-visible){position:static;opacity:1;pointer-events:auto}
-    @media(prefers-reduced-motion:reduce){#nowPlayingBtn,.display-header{transition:none}}
+    @media(prefers-reduced-motion:reduce){.display-header{transition:none}}
     .display-header h2{margin:0;font-size:clamp(20px,3.3vmin,32px)}
     .display-header button{margin:0}
     .display-content{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);align-items:center;gap:clamp(18px,5vmin,56px);width:min(100%,1340px);margin:auto}
@@ -137,8 +136,6 @@
           <a id="albumLink" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
         </div>
       </div>
-      <button id="startBtn" class="primary" type="button">Resume Spotify sync</button>
-      <button id="checkBtn" type="button">Check Spotify now</button>
       <button id="nowPlayingBtn" type="button" aria-haspopup="dialog">Open Now Playing</button>
     </section>
   </div>
@@ -888,16 +885,14 @@ $('ledPowerBtn').onclick=()=>setLedPower(!(ledPowerKnown && ledIsOn));
 $('ledPowerOffBtn').onclick=()=>setLedPower(false);
 $('ledBrightness').oninput=e=>setLedBrightness(e.target.value);
 renderLedControls();
-$('checkBtn').onclick=checkSpotify;
 $('displayCover').onload=()=>{$('displayCover').hidden=!displayArtwork};
 $('displayCover').onerror=()=>{$('displayCover').hidden=true};
 function showNowPlayingControls(){
- const controls=[$('nowPlayingBtn'),$('nowPlayingView')];
- for(const control of controls)control.setAttribute('data-pointer-active','');
+ const view=$('nowPlayingView');
+ if(!view.open)return;
+ view.setAttribute('data-pointer-active','');
  clearTimeout(nowPlayingControlsTimer);
- nowPlayingControlsTimer=setTimeout(()=>{
-  for(const control of controls)control.removeAttribute('data-pointer-active');
- },2500);
+ nowPlayingControlsTimer=setTimeout(()=>view.removeAttribute('data-pointer-active'),2500);
 }
 document.addEventListener('pointermove',showNowPlayingControls);
 document.addEventListener('pointerdown',showNowPlayingControls); // A tap reveals the same controls on touch screens.
@@ -908,6 +903,8 @@ $('nowPlayingBtn').onclick=()=>{
 };
 $('closeNowPlayingBtn').onclick=()=>$('nowPlayingView').close();
 $('nowPlayingView').onclose=()=>{
+ clearTimeout(nowPlayingControlsTimer);
+ $('nowPlayingView').removeAttribute('data-pointer-active');
  if(!shouldPollSpotify())scheduleNextPoll(0);
 };
 document.addEventListener('visibilitychange',()=>{
@@ -917,7 +914,6 @@ document.addEventListener('visibilitychange',()=>{
   scheduleNextPoll(0);
  }
 });
-$('startBtn').onclick=startSync;
 $('stopBtn').onclick=()=>{stopSync();$('startupStatus').textContent='Sync stopped. Pick a manual color or start Album Glow again.'};
 $('redirect').value=REDIRECT;
 if(location.protocol!=='https:'){$('alert').textContent='This local preview cannot sign in to Spotify. Use the existing HTTPS Album Glow website for Spotify sign-in.';}

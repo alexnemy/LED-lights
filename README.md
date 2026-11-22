@@ -32,7 +32,7 @@ Keep one Album Glow tab open, close the Apollo phone app, and temporarily turn o
 
 Choosing a manual color pauses Spotify sync and cancels stale unsent album commands, so the next poll cannot overwrite your choice. A command already transmitted cannot be recalled; the queued manual choice follows it. Invalid hex input leaves the current sync/color intact. Live picker/hex updates are paced to at most five scheduled color sends per second, with the newest pending value replacing older ones; the existing Bluetooth queue still serializes all writes. Incomplete/invalid hex entries cancel unsent input and keep the current lights unchanged. Resuming Spotify, selecting a preset, stopping, or disconnecting cancels pending live input so a delayed edit cannot override a newer action.
 
-The last manual hex color is saved locally and shown after reloading. Picking a color while disconnected stores the choice for this visit and sends it when you connect; after a reconnect during this visit, manual mode restores that choice. Choosing while LEDs are software-off saves the color for power-on. There is no automatic Spotify login for manual mode. Use **Start Album Glow** or **Resume Spotify sync** to return to album colors.
+The last manual hex color is saved locally and shown after reloading. Picking a color while disconnected stores the choice for this visit and sends it when you connect; after a reconnect during this visit, manual mode restores that choice. Choosing while LEDs are software-off saves the color for power-on. There is no automatic Spotify login for manual mode. Use **Start Album Glow** to return to album colors.
 
 ## Settings and optional checks
 

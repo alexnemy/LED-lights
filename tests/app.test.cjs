@@ -723,24 +723,27 @@ test('Now Playing shares the LED poll and keeps checking after Bluetooth disconn
   assert.equal(h.run('syncTimer'),null);
 });
 
-test('Now Playing controls appear on pointer activity and hide after the last movement', t=>{
+test('only the Now Playing dialog controls are revealed by pointer activity', t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const h=harness(t);
-  const controls=['nowPlayingBtn','nowPlayingView'].map(h.element);
+  const view=h.element('nowPlayingView'), openButton=h.element('nowPlayingBtn');
   const isRevealed=control=>control.getAttribute('data-pointer-active')==='';
-  assert.ok(controls.every(control=>!isRevealed(control)));
   h.dispatchDocument('pointermove');
-  assert.ok(controls.every(isRevealed));
+  assert.equal(isRevealed(view),false);
+  h.element('nowPlayingBtn').onclick();
+  h.dispatchDocument('pointermove');
+  assert.equal(isRevealed(view),true);
+  assert.equal(isRevealed(openButton),false);
   t.mock.timers.tick(2000);
   h.dispatchDocument('pointermove');
   t.mock.timers.tick(2000);
-  assert.ok(controls.every(isRevealed));
+  assert.equal(isRevealed(view),true);
   t.mock.timers.tick(500);
-  assert.ok(controls.every(control=>!isRevealed(control)));
+  assert.equal(isRevealed(view),false);
   h.dispatchDocument('pointerdown',{pointerType:'touch'});
-  assert.ok(controls.every(isRevealed));
-  t.mock.timers.tick(2500);
-  assert.ok(controls.every(control=>!isRevealed(control)));
+  assert.equal(isRevealed(view),true);
+  h.element('closeNowPlayingBtn').onclick();
+  assert.equal(isRevealed(view),false);
 });
 
 test('Spotify checks on a two-second interval even with an older saved interval', async t=>{
