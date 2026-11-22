@@ -289,9 +289,9 @@ test('startup resumes after an automatic connection retry, without a second clic
   assert.equal(h.chooserCalls.length,1);
 });
 
-test('Stop during pending startup prevents late chooser result from starting sync', async t=>{
+test('Cancelling sync during pending startup prevents a late chooser result from starting it', async t=>{
   let finish;const h=harness(t,{saved:savedSpotify(),requestDevice:()=>new Promise(resolve=>{finish=resolve;})});
-  const startup=h.run('startAlbumGlow()');h.element('stopBtn').onclick();finish(h.device);await startup;
+  const startup=h.run('startAlbumGlow()');h.run('stopSync()');finish(h.device);await startup;
   assert.equal(h.run('syncing'),false);assert.equal(h.run('startupRequest'),null);
 });
 

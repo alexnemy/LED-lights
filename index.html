@@ -26,7 +26,8 @@
     .tiny{font-size:12px}
     @media(max-width:690px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.cover{width:80px;height:80px}.now{min-height:80px}}
 
-    .heading{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
+    .heading{display:flex;flex-wrap:wrap;justify-content:space-between;gap:14px;align-items:center;margin-bottom:8px}
+    .heading-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
     .heading h1{margin:0}.heading button{margin:0;flex-shrink:0}
     #startupBtn{font-size:18px;padding:13px 22px}#startupStatus{margin-bottom:0}
     .preset-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:14px 0}
@@ -37,7 +38,7 @@
     .color-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.color-controls label{margin-top:0}
     input[type="color"]{width:62px;height:44px;padding:3px;cursor:pointer}
     .hex-control{flex:1;min-width:140px}
-    .artwork-heading{font-size:16px;margin:18px 0 10px}.now>div{min-width:0;overflow-wrap:anywhere}.cover{flex-shrink:0}
+    .now>div{min-width:0;overflow-wrap:anywhere}.cover{flex-shrink:0}
     .state:empty{margin:0}
     #logCopyText{width:100%;min-height:130px;background:#111318;color:#ededf2;border:1px solid #525662;border-radius:9px;padding:10px;font:12px monospace}
     details summary{cursor:pointer;color:#bac2d0}details[open] summary{margin-bottom:12px}
@@ -89,12 +90,21 @@
 <main>
   <div class="heading">
     <h1>✦ Album Glow <span class="chip">Your music, your light</span></h1>
-    <button id="settingsBtn" type="button" aria-haspopup="dialog">Settings</button>
+    <div class="heading-actions">
+      <button id="startupBtn" class="primary" type="button">Start Album Glow</button>
+      <button id="settingsBtn" type="button" aria-haspopup="dialog">Settings</button>
+    </div>
   </div>
   <p class="sub">Sync your lights with Spotify, or choose a color of your own.</p>
   <section class="panel">
-    <button id="startupBtn" class="primary" type="button">Start Album Glow</button>
-    <button id="stopBtn" type="button">Stop syncing</button>
+    <div class="now">
+      <img id="cover" class="cover" alt="Currently playing album cover" hidden>
+      <div>
+        <div id="song" class="song">No song loaded</div>
+        <div id="artist" style="color:#a8aeb9">Play a song on Spotify on either device.</div>
+        <a id="albumLink" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
+      </div>
+    </div>
     <div id="startupStatus" class="state" role="status">Ready when you are. You can also connect Bluetooth and use colors without Spotify.</div>
     <div id="syncStatus" class="state" role="status">Not syncing</div>
     <div id="alert" role="alert"></div>
@@ -126,16 +136,7 @@
       <label for="ledBrightness">Brightness <strong id="ledBrightnessValue">100%</strong></label>
       <input id="ledBrightness" type="range" min="0" max="100" value="100" step="1" style="padding:0;accent-color:#77b0ff">
       <div class="state" id="ledControlsStatus">Connect Bluetooth to use power controls.</div>
-      <h3 class="artwork-heading">From your album artwork</h3>
-      <div class="now">
-        <img id="cover" class="cover" alt="Currently playing album cover" hidden>
-        <div>
-          <div id="song" class="song">No song loaded</div>
-          <div id="artist" style="color:#a8aeb9">Play a song on Spotify on either device.</div>
-          <div style="margin-top:10px"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
-          <a id="albumLink" class="spotify-attribution" target="_blank" rel="noreferrer" hidden><img alt="Open in Spotify" src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_White.png" referrerpolicy="no-referrer"></a>
-        </div>
-      </div>
+      <div style="margin-top:10px"><span id="swatch" class="swatch" style="background:#525865"></span><span id="colorCode">—</span></div>
       <button id="nowPlayingBtn" type="button" aria-haspopup="dialog">Open Now Playing</button>
     </section>
   </div>
@@ -914,7 +915,6 @@ document.addEventListener('visibilitychange',()=>{
   scheduleNextPoll(0);
  }
 });
-$('stopBtn').onclick=()=>{stopSync();$('startupStatus').textContent='Sync stopped. Pick a manual color or start Album Glow again.'};
 $('redirect').value=REDIRECT;
 if(location.protocol!=='https:'){$('alert').textContent='This local preview cannot sign in to Spotify. Use the existing HTTPS Album Glow website for Spotify sign-in.';}
 $('copyRedirectBtn').onclick=async()=>{try{await navigator.clipboard.writeText(REDIRECT);log('Copied redirect URI')}catch(e){$('redirect').select();document.execCommand('copy');log('Copied redirect URI')}};
