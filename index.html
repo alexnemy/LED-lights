@@ -275,7 +275,6 @@ async function setLedPower(on){
   await bluetooth.write(POWER_FRAME(on)); // Apollo-family power command; verify on your controller.
   if(!bluetooth.active(session,generation))return;
   ledIsOn=on;ledPowerKnown=true;
-  $('ledControlsStatus').textContent=on?'Power ON bytes sent (unverified on this controller)':'Power OFF bytes sent (unverified on this controller)';
   log('LED power '+(on?'ON':'OFF')+' command sent');
   ledPowerBusy=false;
   if(on && lastLedRgb){
