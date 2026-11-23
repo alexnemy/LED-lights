@@ -843,7 +843,7 @@ test('Now Playing advances locally, corrects seeks and skips, and freezes on pau
   const track={id:'first',name:'First song',duration_ms:125000};
   let playback={item:track,progress_ms:42000,is_playing:true};
   let checks=0;
-  h.context.fetch=async()=>{checks++;return {ok:true,status:200,json:async()=>playback};};
+  h.context.fetch=async()=>{checks++;return playback ? {ok:true,status:200,json:async()=>playback} : {ok:true,status:204};};
   const bar=h.element('displayProgress'), timing=h.element('displayTiming');
   h.element('nowPlayingBtn').onclick();
   t.mock.timers.tick(0);
@@ -896,6 +896,18 @@ test('Now Playing advances locally, corrects seeks and skips, and freezes on pau
   t.mock.timers.tick(2000);
   await settle();
   assert.notEqual(h.run('progressTimer'),null);
+  playback=null;
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.equal(h.element('displayTitle').textContent,'First song');
+  assert.equal(h.element('displayStateLabel').textContent,'Paused');
+  assert.equal(h.element('playingBars').getAttribute('data-paused'),'');
+  assert.equal(h.element('displayDuration').textContent,'2:05');
+  const pausedPosition=bar.value;
+  t.mock.timers.tick(2000);
+  await settle();
+  assert.equal(bar.value,pausedPosition);
+  assert.equal(h.run('progressTimer'),null);
   h.element('closeNowPlayingBtn').onclick();
   assert.equal(h.run('progressTimer'),null);
   assert.equal(h.run('syncTimer'),null);
