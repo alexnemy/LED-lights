@@ -174,7 +174,7 @@ test('HTTP 429 respects Retry-After, and overlapping playback polls stay suppres
   assert.ok(h.run('rateLimitUntil-Date.now()')>=7000);
   assert.match(h.element('syncStatus').textContent,/Waiting 7s/);
   let count=0;h.context.fetch=async()=>{count++;};await h.run('checkSpotify()');assert.equal(count,0);
-  h.run('rateLimitUntil=0');
+  h.run('rateLimitUntil=Date.now()-1');
   h.context.fetch=async()=>({ok:true,status:204});
   await h.run('checkSpotify()');
   assert.equal(h.run('rateLimitCount'),0);
@@ -182,6 +182,31 @@ test('HTTP 429 respects Retry-After, and overlapping playback polls stay suppres
   h.context.fetch=async()=>({ok:true,status:200,json:async()=>({})});
   await h.run('checkSpotify()');
   assert.equal(h.element('syncStatus').textContent,'No active Spotify track');
+});
+
+test('Spotify cooldown survives reload even when sync changes during the limited request', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const first=harness(t,{saved:savedSpotify()});
+  let respond;
+  first.context.fetch=()=>new Promise(resolve=>{respond=resolve;});
+  const pending=first.run('checkSpotify()');
+  await settle();
+  first.run('stopSync()');
+  respond({status:429,headers:{get:()=> '7'}});
+  await pending;
+
+  const key='albumglow_spotify_cooldown_until';
+  const deadline=first.context.localStorage.getItem(key);
+  assert.equal(deadline,'7500');
+  const reloaded=harness(t,{saved:{...savedSpotify(),[key]:deadline}});
+  reloaded.element('nowPlayingBtn').onclick();
+  t.mock.timers.tick(7499);
+  await settle();
+  assert.equal(reloaded.requests.length,0);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(reloaded.requests.length,1);
+  assert.equal(reloaded.context.localStorage.getItem(key),null);
 });
 
 test('disconnect clears page references but preserves automatic sync intent until user stops', async t=>{
