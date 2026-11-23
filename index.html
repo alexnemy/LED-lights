@@ -85,7 +85,7 @@
     @media(prefers-reduced-motion:reduce){.playing-bars span{animation:none}}
     #displayTitle{font-size:clamp(35.2px,7.7vmin,100.1px);line-height:1.12;overflow-wrap:anywhere;margin:0;text-wrap:balance}
     #displayArtist{font-size:var(--display-artist-size);overflow-wrap:anywhere}
-    #displayTiming{display:grid;grid-template-columns:minmax(3ch,auto) minmax(0,1fr) minmax(3ch,auto);align-items:center;gap:9px;width:min(100%,520px);margin:12px 0 0;color:#b8c4d8;font-size:32px;font-variant-numeric:tabular-nums}
+    #displayTiming{display:grid;grid-template-columns:minmax(3ch,auto) minmax(0,1fr) minmax(3ch,auto);align-items:center;gap:9px;height:50px;width:min(100%,520px);margin:12px 0 0;color:#b8c4d8;font-size:32px;font-variant-numeric:tabular-nums}
     #displayTiming[hidden]{display:none}
     #displayElapsed{text-align:right}
     #displayDuration{text-align:left}
@@ -95,7 +95,7 @@
     #displayProgress::-moz-progress-bar{background:#b6d0ff;border-radius:999px}
     .spotify-attribution{display:inline-block;margin-top:12px}
     .spotify-attribution img{display:block;width:84px;height:auto}
-    #displaySpotify img{width:auto;height:40px;max-width:100%;object-fit:contain}
+    #displaySpotify img{width:auto;height:50px;max-width:100%;object-fit:contain}
     .spotify-attribution[hidden]{display:none}
     @media(orientation:portrait){
       .display-content{grid-template-columns:1fr;text-align:center}
