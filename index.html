@@ -243,7 +243,7 @@ let device=null, char=null, syncTimer=null, syncing=false, polling=false, curren
 let rateLimitUntil=0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, spotifyLoginPending=false;
 let displayArtwork='', nowPlayingControlsTimer;
-let playbackTiming=null, progressTimer=null;
+let playbackTiming=null, progressTimer=null, displayedTrack=null;
 const grantedDevices=new Map();
 const previousDeviceId=localStorage.getItem('albumglow_device'),previousManualColor=localStorage.getItem('albumglow_manual_color');
 let manualColor=previousManualColor||'#FF0000', manualRequested=false;
@@ -777,6 +777,9 @@ function stopProgressTimer(){
  clearTimeout(progressTimer);
  progressTimer=null;
 }
+function elapsedPlaybackTime({position,duration,observedAt,playing}){
+ return Math.min(duration,position+(playing?Math.max(0,performance.now()-observedAt):0));
+}
 function renderPlaybackProgress(){
  const view=$('nowPlayingView'), timing=$('displayTiming');
  timing.hidden=!playbackTiming;
@@ -784,8 +787,8 @@ function renderPlaybackProgress(){
   stopProgressTimer();
   return;
  }
- const {position,duration,observedAt,playing}=playbackTiming;
- const elapsed=Math.min(duration,position+(playing?Math.max(0,performance.now()-observedAt):0));
+ const {duration,playing}=playbackTiming;
+ const elapsed=elapsedPlaybackTime(playbackTiming);
  const progress=$('displayProgress');
  progress.max=duration;
  progress.value=elapsed;
@@ -804,7 +807,10 @@ function renderPlaybackProgress(){
 }
 function renderNowPlaying(payload,problem){
  const track=payload?.item;
- const position=payload?.progress_ms, duration=track?.duration_ms;
+ const samePausedTrack=track?.id && track.id===displayedTrack?.id && payload.is_playing===false;
+ const position=payload?.progress_ms ?? (samePausedTrack && playbackTiming ? elapsedPlaybackTime(playbackTiming) : null);
+ const duration=track?.duration_ms;
+ displayedTrack=track??null;
  const validTiming=Number.isFinite(position) && position>=0 && Number.isFinite(duration) && duration>0;
  playbackTiming=validTiming?{position,duration,observedAt:performance.now(),playing:payload.is_playing===true}:null;
  renderPlaybackProgress();
@@ -916,7 +922,13 @@ async function checkSpotify(){
   const data=statusCode===204?null:await response.json();
   if(run!==syncGeneration)return;
   if(rateLimitCount){rateLimitCount=0;rateLimitUntil=0;log('Spotify rate limit cleared')}
-  renderNowPlaying(data);
+  // Spotify can return no current item when playback is paused or stopped.
+  const lastKnownPlayback=displayedTrack && {
+   item:displayedTrack,
+   is_playing:false,
+   progress_ms:playbackTiming ? elapsedPlaybackTime(playbackTiming) : null
+  };
+  renderNowPlaying(data?.item ? data : lastKnownPlayback);
   playbackLoaded=true;
   if(!syncing && $('nowPlayingView').open)return;
   if(!data?.item){
