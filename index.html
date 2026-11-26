@@ -235,12 +235,14 @@
 'use strict';
 const $=id=>document.getElementById(id);
 const REDIRECT = location.origin + location.pathname;
-const SPOTIFY_POLL_INTERVAL_MS=2000;
+const SPOTIFY_PLAYING_INTERVAL_MS=2000;
+const SPOTIFY_IDLE_INTERVAL_MS=5000;
 const SPOTIFY_COOLDOWN_KEY='albumglow_spotify_cooldown_until';
 const vividAlbumColors=localStorage.getItem('albumglow_vivid')!=='false';
 const COMMON_SERVICES=[0xffe0,0xfff0,0xffa0,0xffb0,0xffe5,0xffd0,0xff00,0xfff6,0xfff5,0xff60,0xffc0,0xffe6,0xffd5,0xfe00,0x180a];
 const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, syncTimer=null, syncing=false, polling=false, currentAlbum='', spotifyToken=null;
+let spotifyIsPlaying=false;
 let rateLimitUntil=Number(localStorage.getItem(SPOTIFY_COOLDOWN_KEY))||0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, spotifyLoginPending=false;
 let displayArtwork='', nowPlayingControlsTimer;
@@ -559,7 +561,7 @@ async function spotifyAccess(){
  if(spotifyToken!==previousToken)throw new DOMException('Spotify session changed','AbortError');
  setTokens(data);return spotifyToken.access;
 }
-function spotifyLogout(){spotifyToken=null;localStorage.removeItem('albumglow_tokens');stopSync();renderNowPlaying();status('spotify','Disconnected locally. Revoke app access in Spotify account settings if desired.')}
+function spotifyLogout(){spotifyToken=null;spotifyIsPlaying=false;localStorage.removeItem('albumglow_tokens');stopSync();renderNowPlaying();status('spotify','Disconnected locally. Revoke app access in Spotify account settings if desired.')}
 // GATT state and the write queue live in one small, separately tested helper.
 const bluetooth=new AlbumGlowBluetooth({
  storage:localStorage,
@@ -878,7 +880,7 @@ async function updateSong(payload,run=syncGeneration){
 function shouldPollSpotify(){
  return syncing || ($('nowPlayingView').open && Boolean(spotifyToken));
 }
-function scheduleNextPoll(ms){
+function scheduleNextPoll(ms=spotifyIsPlaying ? SPOTIFY_PLAYING_INTERVAL_MS : SPOTIFY_IDLE_INTERVAL_MS){
  clearTimeout(syncTimer);
  syncTimer=null;
  if(!shouldPollSpotify())return;
@@ -887,7 +889,7 @@ function scheduleNextPoll(ms){
   if(!shouldPollSpotify())return;
   try{await checkSpotify()}finally{
    if(shouldPollSpotify()){
-    scheduleNextPoll(SPOTIFY_POLL_INTERVAL_MS);
+    scheduleNextPoll();
    }
   }
  }, Math.max(0,ms,rateLimitUntil-Date.now()));
@@ -933,6 +935,7 @@ async function checkSpotify(){
    is_playing:false,
    progress_ms:playbackTiming ? elapsedPlaybackTime(playbackTiming) : null
   };
+  spotifyIsPlaying=Boolean(data?.item && data.is_playing===true);
   renderNowPlaying(playback);
   playbackLoaded=true;
   if(!syncing && $('nowPlayingView').open)return;
@@ -962,7 +965,7 @@ function startSync(){
  syncing=true;syncGeneration++;
  $('alert').textContent='';
  $('syncStatus').textContent='Syncing · checking now…';
- log('Automatic sync started; Spotify check every '+(SPOTIFY_POLL_INTERVAL_MS/1000)+' seconds.');
+ log('Automatic Spotify sync started.');
  scheduleNextPoll(0);
 }
 function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
@@ -970,7 +973,7 @@ function stopSync({cancelPendingStartup=true,cancelColorInput=true}={}){
  if(cancelPendingStartup)cancelStartup();
  const wasSyncing=syncing;
  syncing=false;syncGeneration++;
- scheduleNextPoll(SPOTIFY_POLL_INTERVAL_MS);
+ scheduleNextPoll();
  if(wasSyncing)log('Automatic sync stopped');
  $('syncStatus').textContent='Not syncing';
 }

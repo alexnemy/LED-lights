@@ -823,9 +823,13 @@ test('only the Now Playing dialog controls are revealed by pointer activity', t=
   assert.equal(isRevealed(view),false);
 });
 
-test('Spotify checks on a two-second interval even with an older saved interval', async t=>{
+test('Active Spotify playback checks every two seconds even with an older saved interval', async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const h=harness(t,{saved:{...savedSpotify(),albumglow_interval:'15000'}});
+  h.context.fetch=async url=>{
+    h.requests.push({url});
+    return {ok:true,status:200,json:async()=>({item:{id:'song'},is_playing:true})};
+  };
   h.element('nowPlayingBtn').onclick();
   t.mock.timers.tick(0);
   await settle();
@@ -896,8 +900,13 @@ test('Now Playing advances locally, corrects seeks and skips, and freezes on pau
   assert.equal(bar.value,7000);
 
   playback={item:track,progress_ms:9000,is_playing:true};
-  t.mock.timers.tick(1000);
+  t.mock.timers.tick(3999);
   await settle();
+  assert.equal(checks,2);
+  assert.equal(bar.value,7000);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(checks,3);
   assert.equal(bar.value,9000);
   t.mock.timers.tick(1000);
   assert.equal(bar.value,10000);
@@ -928,9 +937,13 @@ test('Now Playing advances locally, corrects seeks and skips, and freezes on pau
   assert.equal(h.element('displayStateLabel').textContent,'Paused');
   assert.equal(h.element('playingBars').getAttribute('data-paused'),'');
   assert.equal(h.element('displayDuration').textContent,'2:05');
-  const pausedPosition=bar.value;
-  t.mock.timers.tick(2000);
+  const pausedPosition=bar.value, idleChecks=checks;
+  t.mock.timers.tick(4999);
   await settle();
+  assert.equal(checks,idleChecks);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(checks,idleChecks+1);
   assert.equal(bar.value,pausedPosition);
   assert.equal(h.run('progressTimer'),null);
   h.element('closeNowPlayingBtn').onclick();
