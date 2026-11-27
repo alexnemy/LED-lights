@@ -824,7 +824,7 @@ test('only the Now Playing dialog controls are revealed by pointer activity', t=
 });
 
 test('Active Spotify playback checks every two seconds even with an older saved interval', async t=>{
-  t.mock.timers.enable({apis:['setTimeout']});
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
   const h=harness(t,{saved:{...savedSpotify(),albumglow_interval:'15000'}});
   h.context.fetch=async url=>{
     h.requests.push({url});
@@ -834,12 +834,58 @@ test('Active Spotify playback checks every two seconds even with an older saved 
   t.mock.timers.tick(0);
   await settle();
   assert.equal(h.requests.length,1);
-  t.mock.timers.tick(1999);
+  t.mock.timers.tick(1000);
+  h.dispatchDocument('visibilitychange');
+  t.mock.timers.tick(999);
   await settle();
   assert.equal(h.requests.length,1);
   t.mock.timers.tick(1);
   await settle();
   assert.equal(h.requests.length,2);
+});
+
+test('Tab returns, reopening Now Playing, and reconnecting LEDs respect the paused Spotify interval', async t=>{
+  t.mock.timers.enable({apis:['setTimeout','Date'],now:0});
+  const h=harness(t,{saved:savedSpotify()});
+  const checks=[];
+  h.context.fetch=async ()=>{
+    checks.push(Date.now());
+    return {ok:true,status:200,json:async()=>({item:{id:'paused'},is_playing:false})};
+  };
+  await h.connect();
+  h.element('nowPlayingBtn').onclick();
+  t.mock.timers.tick(0);
+  await settle();
+
+  t.mock.timers.tick(1000);
+  h.dispatchDocument('visibilitychange');
+  t.mock.timers.tick(0);
+  await settle();
+  assert.deepEqual(checks,[0]);
+
+  t.mock.timers.tick(1000);
+  h.element('closeNowPlayingBtn').onclick();
+  h.element('nowPlayingBtn').onclick();
+  t.mock.timers.tick(0);
+  await settle();
+  assert.deepEqual(checks,[0]);
+
+  t.mock.timers.tick(1000);
+  h.run('startSync()');
+  t.mock.timers.tick(0);
+  await settle();
+  assert.deepEqual(checks,[0]);
+
+  h.device.gatt.disconnect();
+  await h.run('clearTimeout(bluetooth.session.retryTimer);bluetooth.session.retryTimer=null;bluetooth.connect(bluetooth.session)');
+  assert.equal(h.device.gatt.connected,true);
+  assert.equal(h.run('syncing'),true);
+  t.mock.timers.tick(1999);
+  await settle();
+  assert.deepEqual(checks,[0]);
+  t.mock.timers.tick(1);
+  await settle();
+  assert.deepEqual(checks,[0,5000]);
 });
 
 test('Bluetooth controls in Settings can connect and disconnect without Spotify', async t=>{
