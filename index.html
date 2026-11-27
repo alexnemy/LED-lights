@@ -243,6 +243,7 @@ const COMMON_SERVICES=[0xffe0,0xfff0,0xffa0,0xffb0,0xffe5,0xffd0,0xff00,0xfff6,0
 const COLOR_FRAME=(r,g,b)=>new Uint8Array([0x78,r,g,b,0x00,0xf0,0xee]);
 let device=null, char=null, syncTimer=null, syncing=false, polling=false, currentAlbum='', spotifyToken=null;
 let spotifyIsPlaying=false;
+let lastSpotifyPollStarted=-Infinity;
 let rateLimitUntil=Number(localStorage.getItem(SPOTIFY_COOLDOWN_KEY))||0, rateLimitCount=0, syncGeneration=0, powerGeneration=0, selectionGeneration=0;
 let startupRequest=null, spotifyLoginPending=false;
 let displayArtwork='', nowPlayingControlsTimer;
@@ -880,10 +881,15 @@ async function updateSong(payload,run=syncGeneration){
 function shouldPollSpotify(){
  return syncing || ($('nowPlayingView').open && Boolean(spotifyToken));
 }
-function scheduleNextPoll(ms=spotifyIsPlaying ? SPOTIFY_PLAYING_INTERVAL_MS : SPOTIFY_IDLE_INTERVAL_MS){
+function scheduleNextPoll(delay){
  clearTimeout(syncTimer);
  syncTimer=null;
  if(!shouldPollSpotify())return;
+ const interval=spotifyIsPlaying ? SPOTIFY_PLAYING_INTERVAL_MS : SPOTIFY_IDLE_INTERVAL_MS;
+ // Focus, reopening the display, or reconnecting can bring a check forward
+ // only after the current playback interval and any Spotify cooldown have elapsed.
+ const remaining=interval-(performance.now()-lastSpotifyPollStarted);
+ const wait=Math.max(delay??interval,remaining,rateLimitUntil-Date.now());
  syncTimer=setTimeout(async()=>{
   syncTimer=null;
   if(!shouldPollSpotify())return;
@@ -892,7 +898,7 @@ function scheduleNextPoll(ms=spotifyIsPlaying ? SPOTIFY_PLAYING_INTERVAL_MS : SP
     scheduleNextPoll();
    }
   }
- }, Math.max(0,ms,rateLimitUntil-Date.now()));
+ }, Math.ceil(wait));
 }
 async function checkSpotify(){
  if(polling || (syncing && !char && !$('nowPlayingView').open))return;
@@ -907,6 +913,7 @@ async function checkSpotify(){
  try{
   const access=await spotifyAccess();
   if(run!==syncGeneration)return;
+  lastSpotifyPollStarted=performance.now();
   const response=await fetch('https://api.spotify.com/v1/me/player/currently-playing',{headers:{Authorization:'Bearer '+access},cache:'no-store'});
   const statusCode=response.status;
   if(statusCode===429){
@@ -964,7 +971,7 @@ function startSync(){
  currentAlbum=''; // Resend current album color on every fresh start.
  syncing=true;syncGeneration++;
  $('alert').textContent='';
- $('syncStatus').textContent='Syncing · checking now…';
+ $('syncStatus').textContent='Syncing · checking Spotify…';
  log('Automatic Spotify sync started.');
  scheduleNextPoll(0);
 }
@@ -1027,8 +1034,8 @@ $('nowPlayingView').onclose=()=>{
 };
 document.addEventListener('visibilitychange',()=>{
  if(shouldPollSpotify() && !document.hidden){
-  log('Album Glow tab visible — checking for song change now');
-  if(syncing)$('syncStatus').textContent='Syncing · checking now…';
+  log('Album Glow tab visible — Spotify check scheduled');
+  if(syncing)$('syncStatus').textContent='Syncing · checking Spotify…';
   scheduleNextPoll(0);
  }
 });
